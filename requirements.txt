@@ -1,0 +1,13 @@
+# Hermes-live 依赖（py3.13 + Apple Silicon，全部有预编译轮子，2026-08 实查）
+aiohttp>=3.14,<4
+pyyaml>=6
+edge-tts==7.2.8
+faster-whisper==1.2.1
+ctranslate2>=4.8.1,<5
+onnxruntime>=1.28,<2
+av>=15,<19
+pysilero-vad==3.4.0
+# 仅 M0 终端模式用（universal2 轮子内置 PortAudio）
+sounddevice==0.5.5
+# 测试
+pytest>=8

@@ -1,0 +1,95 @@
+"""集中配置：默认值 → config.yaml 覆盖 → 环境变量覆盖（HERMES_LIVE_*）。"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+
+import yaml
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+@dataclass
+class Config:
+    # 服务
+    host: str = "127.0.0.1"
+    port: int = 8698
+
+    # Hermes gateway（只读依赖，绝不重启/修改它）
+    hermes_base_url: str = "http://127.0.0.1:8647"
+    hermes_api_key: str = "hermes-local-key"
+    hermes_model: str = "k3"
+    # 每轮叠加的临时 system 提示（网关将其层叠在核心 prompt 之上，不改 Hermes 配置）
+    voice_system_prompt: str = (
+        "你正在和用户进行实时语音对话。回答务必口语化、简短直接，"
+        "默认三五句话说完；不用 markdown、不列清单、不贴代码。"
+        "用中文回答，除非用户要求其他语言。"
+    )
+
+    # 音频
+    in_rate: int = 16000          # 上行采样率（whisper/silero 原生）
+    out_rate: int = 24000         # 下行采样率（edge-tts 原生）
+    frame_samples: int = 512      # 512 样本 @16k = 32ms，等于 pysilero chunk 尺寸
+
+    # VAD / 分段
+    vad_threshold: float = 0.5          # listening 档语音概率阈值
+    vad_start_frames: int = 6           # 连续 6 帧（192ms）判入语音段
+    vad_end_silence_ms: int = 600       # 尾静音 600ms 判段结束
+    vad_min_utterance_ms: int = 300     # 短于此丢弃（咳嗽/键盘）
+    vad_max_utterance_ms: int = 30000   # 强制截断
+    vad_preroll_ms: int = 300           # 语音段开头回补
+
+    # barge-in（speaking 态打断档）
+    barge_threshold: float = 0.85
+    barge_hold_ms: int = 320
+    barge_cooldown_ms: int = 450
+    barge_preroll_ms: int = 500
+
+    # ASR
+    asr_model: str = "large-v3-turbo"   # 可降 "small" 省内存
+    asr_compute_type: str = "int8"
+    asr_language: str = "zh"
+    asr_beam_size: int = 1
+    asr_initial_prompt: str = "以下是普通话对话内容。"
+    asr_no_speech_prob_max: float = 0.6
+    asr_avg_logprob_min: float = -1.2
+    asr_download_root: str = str(PROJECT_ROOT / "models")
+
+    # TTS
+    tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    tts_rate: str = "+0%"
+    tts_lookahead: int = 1              # 预合成句数
+
+    # 分句
+    sentence_max_buffer: int = 50       # 缓冲超过此长度时逗号也可切
+    sentence_first_min: int = 10        # 首句加速：≥10 字遇逗号即切
+
+    extra: dict = field(default_factory=dict)
+
+
+def load_config(path: str | os.PathLike | None = None) -> Config:
+    cfg = Config()
+    yaml_path = Path(path) if path else PROJECT_ROOT / "config.yaml"
+    if yaml_path.exists():
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        known = {f.name for f in fields(Config)}
+        for k, v in data.items():
+            if k in known:
+                setattr(cfg, k, v)
+            else:
+                cfg.extra[k] = v
+    for f in fields(Config):
+        env = os.environ.get(f"HERMES_LIVE_{f.name.upper()}")
+        if env is not None:
+            cur = getattr(cfg, f.name)
+            if isinstance(cur, bool):
+                setattr(cfg, f.name, env.lower() in ("1", "true", "yes"))
+            elif isinstance(cur, int):
+                setattr(cfg, f.name, int(env))
+            elif isinstance(cur, float):
+                setattr(cfg, f.name, float(env))
+            elif isinstance(cur, str):
+                setattr(cfg, f.name, env)
+    return cfg

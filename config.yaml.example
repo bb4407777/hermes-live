@@ -1,0 +1,8 @@
+# 复制为 config.yaml 按需覆盖（config.yaml 已 gitignore）。全部键见 server/config.py。
+
+# port: 8698
+# asr_model: small            # 省内存档（默认 large-v3-turbo，约多占 1GB）
+# tts_voice: zh-CN-YunxiNeural  # 男声；默认 zh-CN-XiaoxiaoNeural
+# tts_rate: "+8%"
+# vad_end_silence_ms: 500     # 想更快接话可降到 450-500，误切升高
+# voice_system_prompt: 自定义语音风格提示……
