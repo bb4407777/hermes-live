@@ -13,6 +13,9 @@ const els = {
   btnSend: document.getElementById('btnSend'),
   selVoice: document.getElementById('selVoice'),
   selRate: document.getElementById('selRate'),
+  btnAttach: document.getElementById('btnAttach'),
+  fileIn: document.getElementById('fileIn'),
+  dropOverlay: document.getElementById('dropOverlay'),
 };
 
 const STATE_LABEL = {
@@ -191,5 +194,62 @@ function pushConfig() {
 }
 els.selVoice.addEventListener('change', pushConfig);
 els.selRate.addEventListener('change', pushConfig);
+
+// ---- 附件（架构照抄 areco：上传落盘 → 绝对路径当纯文本回填输入框，可继续编辑）----
+
+function fillPaths(paths) {
+  const insert = paths.join(' ');
+  const cur = els.textIn.value;
+  els.textIn.value = cur ? `${cur.replace(/\s+$/, '')} ${insert} ` : `${insert} `;
+  els.textIn.focus();
+  els.textIn.setSelectionRange(els.textIn.value.length, els.textIn.value.length);
+}
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  els.btnAttach.textContent = '⏳';
+  els.btnAttach.disabled = true;
+  const paths = [];
+  try {
+    for (const f of files) {
+      const proto = location.protocol === 'https:' ? 'https' : 'http';
+      const url = `${proto}://${SERVER}/api/files/upload?name=${encodeURIComponent(f.name)}` +
+        (TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : '');
+      const resp = await fetch(url, { method: 'POST', body: f });
+      if (!resp.ok) throw new Error(`${f.name}: HTTP ${resp.status}`);
+      const data = await resp.json();
+      paths.push(data.data.path);
+    }
+    fillPaths(paths);
+  } catch (err) {
+    addLine('error', `附件上传失败：${err.message || err}`);
+  } finally {
+    els.btnAttach.textContent = '📎';
+    els.btnAttach.disabled = false;
+    els.fileIn.value = '';
+  }
+}
+
+els.btnAttach.addEventListener('click', () => els.fileIn.click());
+els.fileIn.addEventListener('change', () => uploadFiles([...els.fileIn.files]));
+
+// document 级拖拽 + 计数器消除子元素 enter/leave 抖动（areco useFileDrop 同款）
+let dragCount = 0;
+document.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  if (++dragCount === 1) els.dropOverlay.classList.add('show');
+});
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  if (--dragCount <= 0) { dragCount = 0; els.dropOverlay.classList.remove('show'); }
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();               // 必须同步调用，否则浏览器直接打开文件
+  dragCount = 0;
+  els.dropOverlay.classList.remove('show');
+  const files = [...(e.dataTransfer?.files || [])];
+  if (files.length) uploadFiles(files);
+});
 
 setState('idle');

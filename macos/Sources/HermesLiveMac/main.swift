@@ -55,11 +55,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
     private func showPanelWindow() {
         if popover.isShown { popover.performClose(nil) }
         if panelWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 680),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 700),
                              styleMask: [.titled, .closable, .resizable],
                              backing: .buffered, defer: false)
             w.title = "Hermes-Live"
             w.isReleasedWhenClosed = false
+            w.minSize = NSSize(width: 380, height: 520)
+            w.center()
             w.level = .floating
             panelWindow = w
         }
@@ -133,14 +135,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
     private func setupWebView() {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []   // 允许 AudioContext 自动出声
-        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 420, height: 680),
+        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: 700),
                             configuration: config)
         webView.uiDelegate = self
 
         let vc = NSViewController()
         vc.view = webView
         popover.contentViewController = vc
-        popover.contentSize = NSSize(width: 420, height: 680)
+        popover.contentSize = NSSize(width: 460, height: 700)
         popover.behavior = .transient
         webView.loadHTMLString(placeholderHTML("正在启动语音服务…（首次约 20 秒）"), baseURL: nil)
     }

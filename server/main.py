@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from pathlib import Path
 
 import aiohttp
@@ -30,6 +31,59 @@ WEB_DIR = PROJECT_ROOT / "web"
 
 async def handle_index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html")
+
+
+UPLOAD_MAX = 200 * 1024 * 1024  # 与 areco 同款 200MB 上限
+
+
+def _sanitize_name(raw: str) -> str:
+    """照抄 areco 落盘规则：basename → 非法字符换 _ → 截尾 120 保扩展名 → 空则 file。"""
+    import re
+    base = Path(raw).name
+    base = re.sub(r'[/\\:*?"<>|]', "_", base)[-120:]
+    return base or "file"
+
+
+async def handle_upload(request: web.Request) -> web.Response:
+    """POST /api/files/upload?name=<urlencoded原名>，raw body 直收流（areco 同构）。
+    响应 {ok, data:{path, size}}；前端把 path 当纯文本回填输入框，无附件字段。"""
+    cfg = request.app["cfg"]
+    if cfg.auth_token and request.query.get("token") != cfg.auth_token:
+        raise web.HTTPUnauthorized(text="bad token")
+    base = _sanitize_name(request.query.get("name", "file"))
+    day = time.strftime("%Y-%m-%d")
+    dir_ = PROJECT_ROOT / "tmp" / "uploads" / day
+    dir_.mkdir(parents=True, exist_ok=True)
+    target = dir_ / base
+    stem, ext = target.stem, target.suffix
+    i = 2
+    while target.exists():                      # 重名加序号，不覆盖
+        target = dir_ / f"{stem}-{i}{ext}"
+        i += 1
+    size = 0
+    try:
+        with open(target, "wb") as f:
+            async for chunk in request.content.iter_chunked(1 << 16):
+                size += len(chunk)
+                if size > UPLOAD_MAX:
+                    raise web.HTTPRequestEntityTooLarge(
+                        max_size=UPLOAD_MAX, actual_size=size)
+                f.write(chunk)
+    except BaseException:
+        target.unlink(missing_ok=True)          # 半截文件不留
+        raise
+    return web.json_response(
+        {"ok": True, "data": {"path": str(target), "size": size}},
+        headers={"Access-Control-Allow-Origin": "*"})
+
+
+async def handle_upload_options(request: web.Request) -> web.Response:
+    # 手机页面在回环域、上传目标在 Mac —— 跨源预检放行（token 仍拦真请求）
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    })
 
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -120,6 +174,8 @@ def build_app(cfg, preload: bool = True) -> web.Application:
 
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/health", handle_health)
+    app.router.add_post("/api/files/upload", handle_upload)
+    app.router.add_options("/api/files/upload", handle_upload_options)
     app.router.add_get("/ws", handle_ws)
     app.router.add_static("/web", WEB_DIR)
     return app

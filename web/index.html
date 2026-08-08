@@ -16,23 +16,27 @@
     font: 15px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
     display: flex; flex-direction: column; height: 100vh;
   }
-  header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  header { padding: 8px 12px 10px; border-bottom: 1px solid var(--line); }
+  header .row { display: flex; align-items: center; gap: 8px; }
+  header .row + .row { margin-top: 8px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
+  #status {
+    color: var(--dim); font-size: 13px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; min-width: 0;
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  #status { color: var(--dim); font-size: 13px; }
   header .spacer { flex: 1; }
   button {
     background: var(--panel); color: var(--fg); border: 1px solid var(--line);
     border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
   }
   button:hover { border-color: var(--dim); }
   button.primary { background: var(--user); border-color: var(--user); }
   button:disabled { opacity: .4; cursor: default; }
   select {
     background: var(--panel); color: var(--fg); border: 1px solid var(--line);
-    border-radius: 8px; padding: 5px 8px; font-size: 13px;
+    border-radius: 8px; padding: 5px 6px; font-size: 13px;
+    min-width: 0; flex-shrink: 1;         /* 窄屏允许收窄，靠省略号活下来 */
   }
 
   #stage { display: flex; flex-direction: column; align-items: center; padding: 26px 0 10px; }
@@ -67,28 +71,44 @@
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px;
   }
   #textIn:focus { outline: none; border-color: var(--user); }
+  #btnAttach { padding: 8px 10px; }
+  #dropOverlay {
+    position: fixed; inset: 0; display: none; z-index: 99;
+    background: rgba(13, 17, 23, .82); pointer-events: none;  /* 让 drag 事件穿透 */
+    align-items: center; justify-content: center;
+  }
+  #dropOverlay.show { display: flex; }
+  #dropOverlay .hint {
+    border: 2px dashed var(--user); border-radius: 14px;
+    padding: 26px 34px; color: var(--fg); font-size: 15px;
+  }
 </style>
 </head>
 <body>
   <header>
-    <h1>Hermes-live</h1>
-    <span id="status">未连接</span>
-    <span class="spacer"></span>
-    <select id="selVoice" title="音色">
-      <option value="zh-CN-XiaoxiaoNeural">晓晓（女）</option>
-      <option value="zh-CN-YunxiNeural">云希（男）</option>
-      <option value="zh-CN-XiaoyiNeural">晓伊（女）</option>
-      <option value="zh-CN-YunjianNeural">云健（男）</option>
-    </select>
-    <select id="selRate" title="语速">
-      <option value="+0%">语速 1.0x</option>
-      <option value="+15%">语速 1.15x</option>
-      <option value="+30%">语速 1.3x</option>
-      <option value="-15%">语速 0.85x</option>
-    </select>
-    <button id="btnInterrupt" disabled>打断</button>
-    <button id="btnNewSession">新会话</button>
-    <button id="btnToggle" class="primary">开始对话</button>
+    <div class="row">
+      <h1>Hermes-live</h1>
+      <span id="status">未连接</span>
+      <span class="spacer"></span>
+      <button id="btnToggle" class="primary">开始对话</button>
+    </div>
+    <div class="row">
+      <select id="selVoice" title="音色">
+        <option value="zh-CN-XiaoxiaoNeural">晓晓（女）</option>
+        <option value="zh-CN-YunxiNeural">云希（男）</option>
+        <option value="zh-CN-XiaoyiNeural">晓伊（女）</option>
+        <option value="zh-CN-YunjianNeural">云健（男）</option>
+      </select>
+      <select id="selRate" title="语速">
+        <option value="+0%">语速 1.0x</option>
+        <option value="+15%">语速 1.15x</option>
+        <option value="+30%">语速 1.3x</option>
+        <option value="-15%">语速 0.85x</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="btnInterrupt" disabled>打断</button>
+      <button id="btnNewSession">新会话</button>
+    </div>
   </header>
 
   <div id="stage">
@@ -99,9 +119,13 @@
   <div id="transcript"></div>
 
   <footer>
+    <button id="btnAttach" title="发附件（也可直接拖文件进窗口）">📎</button>
+    <input id="fileIn" type="file" multiple hidden>
     <input id="textIn" placeholder="也可以打字（回车发送）…">
     <button id="btnSend">发送</button>
   </footer>
+
+  <div id="dropOverlay"><div class="hint">📁 松手上传，路径自动填入输入框</div></div>
 
   <script type="module" src="/web/app.js"></script>
 </body>
