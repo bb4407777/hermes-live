@@ -1,0 +1,10 @@
+# hermes-live 服务运行必需依赖（npm 包 / 纯服务部署用；开发另见 requirements.txt）
+aiohttp>=3.14,<4
+pyyaml>=6
+edge-tts==7.2.8
+pywhispercpp>=1.5     # 首选 ASR 后端（whisper.cpp，macOS 走 Metal）
+faster-whisper==1.2.1  # 兜底 ASR 后端
+ctranslate2>=4.8.1,<5
+onnxruntime>=1.28,<2
+av>=15,<19
+pysilero-vad==3.4.0

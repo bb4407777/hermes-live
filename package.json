@@ -1,0 +1,17 @@
+{
+  "name": "hermes-live",
+  "version": "0.1.0",
+  "description": "Real-time voice chat with any OpenAI-compatible endpoint — local VAD + whisper ASR + free edge-tts, one command to run. 和任意 OpenAI 兼容端点实时语音对话：本地 VAD + whisper 识别 + 免费 edge-tts，一行命令跑起来。",
+  "bin": { "hermes-live": "./cli.js" },
+  "files": [
+    "cli.js",
+    "server/",
+    "web/",
+    "requirements-core.txt"
+  ],
+  "engines": { "node": ">=16" },
+  "keywords": ["voice", "speech", "whisper", "edge-tts", "openai", "realtime", "voice-assistant", "chinese"],
+  "author": "bb4407777",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/bb4407777/hermes-live.git" }
+}
