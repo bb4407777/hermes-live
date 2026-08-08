@@ -1,6 +1,10 @@
 # 提案：给 api_server 平台配精简 toolset（压语音首字延迟）
 
-**状态：待高律师随下次网关重启一并落**（2026-08-08 拟。按红线：本会话不重启网关；另有会话在做 0.19→0.20 迁移，为避免并发改 config.yaml，本提案只出 diff 不动手）。
+**状态：配置已落（2026-08-08 12:0x，0.20 升级完成后），待下次网关重启生效**。
+备份：`~/.qclaw-hermes/config.yaml.bak-20260808-toolsets`；已验 YAML 解析与结构完整；
+`terminal/delegation` 两名在 0.20 网关的 weixin 段生产在用 = 名字合法性已证。
+重启仍按红线归高律师择时会话外做；生效后跑 `scripts/ws_regression.py` 前后对比首 delta，
+并把「api_server=精简面」补进 hermes SKILL.md（定调双写在生效时点做，不提前）。
 
 ## 背景
 

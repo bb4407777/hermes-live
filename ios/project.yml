@@ -1,0 +1,32 @@
+# xcodegen 工程定义：`xcodegen generate` 生成 HermesLive.xcodeproj（已生成的话可直接双击打开）
+name: HermesLive
+options:
+  bundleIdPrefix: cn.gao
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  HermesLive:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    resources:
+      # 直接引用仓库里的 web/（蓝色文件夹引用），Mac/手机共用同一套页面，改一处两端生效
+      - path: ../web
+        type: folder
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Hermes-Live
+        NSMicrophoneUsageDescription: Hermes-live 语音对话需要使用麦克风。
+        NSLocalNetworkUsageDescription: 需要连接同一 Wi-Fi 下的 Mac 上的 Hermes-live 服务。
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true   # 手机→Mac 明文 ws（有 token 门）；个人自用不过审
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO

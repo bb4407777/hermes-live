@@ -20,6 +20,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
         setupStatusItem()
         setupWebView()
         ensureServer()
+        // 刘海机型菜单栏图标可能被挤进隐藏区（图标一多整个不可见，且新启动的排最左最易中招）。
+        // 检测到被藏就亮出 Dock 图标并自动弹出面板，保证入口永远找得到。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.statusItemHidden() else { return }
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            self.showPanelWindow()
+        }
+    }
+
+    // Dock 图标被点击（或 Finder 里重开）→ 弹面板，作为菜单栏不可见时的入口
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showPanelWindow()
+        return true
+    }
+
+    private func statusItemHidden() -> Bool {
+        guard let win = statusItem.button?.window,
+              let screen = win.screen ?? NSScreen.main else { return false }
+        let f = win.frame
+        if !screen.frame.intersects(f) { return true }
+        if #available(macOS 12.0, *),
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            // 落在刘海区间（左右安全区之外）= 被藏
+            return !(f.maxX <= left.maxX + 1 || f.minX >= right.minX - 1)
+        }
+        return false
+    }
+
+    // 面板窗口模式：与弹窗共用同一个 webView（复用会话），给刘海机兜底
+    private var panelWindow: NSWindow?
+
+    private func showPanelWindow() {
+        if popover.isShown { popover.performClose(nil) }
+        if panelWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 680),
+                             styleMask: [.titled, .closable, .resizable],
+                             backing: .buffered, defer: false)
+            w.title = "Hermes-Live"
+            w.isReleasedWhenClosed = false
+            w.level = .floating
+            panelWindow = w
+        }
+        if webView.superview !== panelWindow!.contentView {
+            popover.contentViewController = nil   // 从弹窗收回 webView
+            panelWindow!.contentView = webView
+        }
+        panelWindow!.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -47,8 +96,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else if let button = statusItem.button {
+            adoptWebViewIntoPopover()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    private func adoptWebViewIntoPopover() {
+        panelWindow?.orderOut(nil)
+        if popover.contentViewController?.view !== webView {
+            panelWindow?.contentView = nil
+            let vc = NSViewController()
+            vc.view = webView
+            popover.contentViewController = vc
         }
     }
 

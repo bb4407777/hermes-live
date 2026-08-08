@@ -14,8 +14,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 @dataclass
 class Config:
     # 服务
-    host: str = "127.0.0.1"
+    host: str = "127.0.0.1"     # 手机接入时改 0.0.0.0（务必同时设 auth_token）
     port: int = 8698
+    auth_token: str = ""        # 非空时 /ws 必须带 ?token=；只监听 127.0.0.1 可留空
 
     # Hermes gateway（只读依赖，绝不重启/修改它）
     hermes_base_url: str = "http://127.0.0.1:8647"

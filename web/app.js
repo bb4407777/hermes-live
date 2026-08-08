@@ -114,10 +114,15 @@ function handleMessage(msg) {
   }
 }
 
+// 手机/远程模式：页面可由别处托管（如 iOS 壳的回环服务器），用 ?server=host:port&token=xxx 指回 Mac
+const PAGE_PARAMS = new URLSearchParams(location.search);
+const SERVER = PAGE_PARAMS.get('server') || location.host;
+const TOKEN = PAGE_PARAMS.get('token') || '';
+
 function connect() {
   return new Promise((resolve, reject) => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws = new WebSocket(`${proto}://${SERVER}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => { setStatus('已连接'); resolve(); };
     ws.onerror = (e) => reject(e);

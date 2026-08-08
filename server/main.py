@@ -57,6 +57,9 @@ async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue) -> None:
 
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
+    cfg = request.app["cfg"]
+    if cfg.auth_token and request.query.get("token") != cfg.auth_token:
+        raise web.HTTPUnauthorized(text="bad token")
     ws = web.WebSocketResponse(heartbeat=30, max_msg_size=4 * 1024 * 1024)
     await ws.prepare(request)
     app = request.app

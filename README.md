@@ -24,7 +24,9 @@ cd ~/Code/hermes-live
 **菜单栏版（推荐日用）**：`macos/build-app.sh` 一键构建 → `~/Applications/Hermes-Live.app`。
 壳自己拉起/守护 python 服务（退出时只杀自己拉的），左键弹语音面板、右键菜单；面板关掉对话不断。
 ad-hoc 签名，重编译后首次开麦会重新弹麦克风授权（钥匙串装了开发证书则自动改用、权限不掉）。
-手机上用：见 `docs/mobile.md`（Tailscale + 网页零开发路线）。给网关提速的待办：`docs/hermes-toolset-proposal.md`。
+手机上用两条路：`docs/mobile.md`（Tailscale + 网页零开发）或 `ios/README-ios.md`（免费个人签真 app，
+工程已生成好，装 Xcode 后双击 `ios/HermesLive.xcodeproj` 即可跑；Mac 侧需 config.yaml 配
+`host: 0.0.0.0` + `auth_token`）。给网关提速的配置已落待重启：`docs/hermes-toolset-proposal.md`。
 
 - 配置：`cp config.yaml.example config.yaml` 后改（音色/ASR 档位/VAD 阈值等，全部键见 `server/config.py`）。
 - 终端模式（无浏览器）：`.venv/bin/python -m cli.m0_pipeline --mic`（半双工；终端 App 需麦克风权限）。
