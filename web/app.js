@@ -191,6 +191,18 @@ function sendText() {
 els.btnSend.addEventListener('click', sendText);
 els.textIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendText(); });
 
+// 打开即聊：页面加载完自动开始对话（壳内麦克风由壳放行、TCC 授权过即静默；
+// 浏览器里授权/自动播放受限则静默回退手动按钮）。?autostart=0 可关。
+(async () => {
+  if (PAGE_PARAMS.get('autostart') === '0') return;
+  try {
+    if (!ws || ws.readyState !== WebSocket.OPEN) await connect();
+    await audio.start();
+    sendJson({ type: 'start' });
+    els.btnToggle.textContent = '停止';
+  } catch { /* 无授权或自动播放受限：保持手动模式 */ }
+})();
+
 function pushConfig() {
   sendJson({ type: 'set_config', voice: els.selVoice.value, tts_rate: els.selRate.value });
 }
