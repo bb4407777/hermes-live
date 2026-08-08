@@ -70,6 +70,9 @@ class Config:
     sentence_max_buffer: int = 50       # 缓冲超过此长度时逗号也可切
     sentence_first_min: int = 10        # 首句加速：≥10 字遇逗号即切
 
+    # 面板是否显示 Hermes 的工具执行过程（如"上班打卡"式 ls——高律师 2026-08-08 定默认不看）
+    show_tool_progress: bool = False
+
     extra: dict = field(default_factory=dict)
 
 

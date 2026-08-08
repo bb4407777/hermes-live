@@ -14,6 +14,7 @@ targets:
       # 直接引用仓库里的 web/（蓝色文件夹引用），Mac/手机共用同一套页面，改一处两端生效
       - path: ../web
         type: folder
+      - path: Assets.xcassets
     info:
       path: Info.plist
       properties:
@@ -30,3 +31,4 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

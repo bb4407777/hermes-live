@@ -191,10 +191,11 @@ class Session:
                         m.mark("first_sentence")
                         queue.put_nowait(s)
                 elif ev.kind == "tool":
-                    tool = ev.tool or {}
-                    self.send_json("tool_progress", turn=t,
-                                   tool=tool.get("tool"), label=tool.get("label"),
-                                   emoji=tool.get("emoji"), status=tool.get("status"))
+                    if self.cfg.show_tool_progress:
+                        tool = ev.tool or {}
+                        self.send_json("tool_progress", turn=t,
+                                       tool=tool.get("tool"), label=tool.get("label"),
+                                       emoji=tool.get("emoji"), status=tool.get("status"))
                 elif ev.kind == "done":
                     finish_reason = ev.finish_reason
             for s in assembler.flush():
