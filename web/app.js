@@ -180,6 +180,8 @@ function sendText() {
   const text = els.textIn.value.trim();
   if (!text) return;
   els.textIn.value = '';
+  // 文字轮不经 ASR、服务端不会回 asr_final，用户气泡在发送侧渲染
+  addBubble('user', text);
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     connect().then(() => sendJson({ type: 'text', text }));
   } else {
