@@ -7,3 +7,5 @@ models/
 .DS_Store
 tmp/
 macos/.build/
+node_modules/
+secrets/

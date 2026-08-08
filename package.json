@@ -13,5 +13,6 @@
   "keywords": ["voice", "speech", "whisper", "edge-tts", "openai", "realtime", "voice-assistant", "chinese"],
   "author": "bb4407777",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/bb4407777/hermes-live.git" }
+  "repository": { "type": "git", "url": "https://github.com/bb4407777/hermes-live.git" },
+  "devDependencies": { "miniprogram-ci": "^2.1.31" }
 }
