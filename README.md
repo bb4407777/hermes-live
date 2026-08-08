@@ -56,9 +56,20 @@ scripts/smoke.sh                          # 冒烟：健康检查 + edge-tts + �
 ## 依赖与备胎
 
 全部 py3.13 + Apple Silicon 预编译轮子（见 `requirements.txt`），明确不装 torch/mlx。
-edge-tts 若被风控：`server/tts.py` 是唯一接口点，备胎 `say -v Tingting`（离线）或 Piper（onnx 本地）。
-whisper 档位：默认 `large-v3-turbo`（int8，约 1.2GB 内存），`config.yaml` 里 `asr_model: small` 可省到 0.4GB。
+ASR 双后端（`server/asr.py`，`asr_backend` 可切）：**默认 pywhispercpp（whisper.cpp turbo q5_0，Metal GPU）**，
+faster-whisper（CPU int8）兜底。edge-tts 若被风控：`server/tts.py` 是唯一接口点，备胎 `say -v Tingting`（离线）或 Piper。
 
-## 实测记录
+安装注意（本机网络实测）：pip 走 `-i https://mirrors.aliyun.com/pypi/simple/`（直连 PyPI 极慢、清华 403）；
+HF 权重走 hf-mirror 且必须 `HF_HUB_DISABLE_XET=1`（Xet CAS 绕过镜像会 401，asr.py 已内置这两个默认值）。
+权重位置：`models/ggml/ggml-large-v3-turbo-q5_0.bin`（547MB，主力）+ `models/` 下 faster-whisper turbo（1.5GB，兜底，可删）。
 
-（M0/M1 验收时回填）
+## 实测记录（M1 Pro 16GB，2026-08-08 验收）
+
+| 项 | 结果 |
+|---|---|
+| ASR 基准（2.9s 中文） | whisper.cpp turbo q5+Metal **RTF 0.35**（转写一字不差）；faster-whisper turbo int8 RTF 1.19（慢，弃）；small RTF 0.41（有错字，弃） |
+| M0 语音全链路 | 停口→首音 **4.10s**（ASR 1.0s + Hermes 首 delta 3.2s + TTS 首包 0.8s），验收线 5s 内 |
+| 延迟大头 | Hermes k3 首 delta 3-4s（模型思考时间，链路侧无法再压）；edge-tts 单句合成快于实时（3.8s 音频 1.7s 合成完） |
+| WS 回归（scripts/ws_regression.py） | 9/9：语音 turn 全事件序 ✓；打断后 turn 递增、旧音频零迟到帧 ✓；网关日志坐实 `SSE client disconnected; interrupted agent task` |
+| 单测 | tests/test_sentencer.py 9/9 |
+| 服务足迹 | whisper.cpp 常驻约 0.7GB；按需启动，停服 `kill $(cat tmp/server.pid)` |

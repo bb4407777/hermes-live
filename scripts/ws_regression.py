@@ -96,6 +96,10 @@ async def main() -> int:
 
             ok = await wait_for(log, lambda l: l.get("agent_done"), what="agent_done")
             check(ok, "收到 agent_done", fails)
+            # 音频与 speaking 态在 agent_done 之后才流完，先等 turn 收口再断言
+            ok = await wait_for(log, lambda l: l.states() and l.states()[-1][0] == "listening",
+                                timeout=60, what="回到 listening")
+            check(ok, "turn 结束回到 listening", fails)
             check(bool(log.get("asr_final")) and len(log.get("asr_final")[0]["text"]) > 0,
                   f"asr_final 非空: {log.get('asr_final') and log.get('asr_final')[0]['text']!r}", fails)
             check(bool(log.get("agent_delta")), "收到 agent_delta", fails)
@@ -103,9 +107,6 @@ async def main() -> int:
             check(("thinking" in [s for s, _ in log.states()])
                   and ("speaking" in [s for s, _ in log.states()]),
                   "状态经过 thinking→speaking", fails)
-            ok = await wait_for(log, lambda l: l.states() and l.states()[-1][0] == "listening",
-                                timeout=30, what="回到 listening")
-            check(ok, "turn 结束回到 listening", fails)
 
             print("== 场景 B：文字 turn + 打断 ==")
             before_turns = set(log.audio_turns)

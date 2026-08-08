@@ -48,7 +48,10 @@ class Config:
     barge_preroll_ms: int = 500
 
     # ASR
-    asr_model: str = "large-v3-turbo"   # 可降 "small" 省内存
+    asr_backend: str = "auto"           # auto | whispercpp | faster
+    asr_ggml_model: str = "models/ggml/ggml-large-v3-turbo-q5_0.bin"
+    asr_threads: int = 6
+    asr_model: str = "large-v3-turbo"   # faster-whisper 档位，可降 "small" 省内存
     asr_compute_type: str = "int8"
     asr_language: str = "zh"
     asr_beam_size: int = 1
