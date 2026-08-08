@@ -69,7 +69,7 @@ HF 权重走 hf-mirror 且必须 `HF_HUB_DISABLE_XET=1`（Xet CAS 绕过镜像�
 |---|---|
 | ASR 基准（2.9s 中文） | whisper.cpp turbo q5+Metal **RTF 0.35**（转写一字不差）；faster-whisper turbo int8 RTF 1.19（慢，弃）；small RTF 0.41（有错字，弃） |
 | M0 语音全链路 | 停口→首音 **4.10s**（ASR 1.0s + Hermes 首 delta 3.2s + TTS 首包 0.8s），验收线 5s 内 |
-| 延迟大头 | Hermes k3 首 delta 3-4s（模型思考时间，链路侧无法再压）；edge-tts 单句合成快于实时（3.8s 音频 1.7s 合成完） |
+| 延迟大头 | Hermes 首 delta 3-4s。**网关实际模型已是 pool-deepseek-v4-flash**（agent.log 坐实；k3 仅 fallback，`/v1/models` 报的 "k3" 是陈旧别名，请求 model 字段不参与选型）——首字慢在 Hermes agent 大 prompt 预填充+池代理，不在模型档位，换模型无收益；会话变热后 3.9s→3.2s（前缀缓存）。edge-tts 单句合成快于实时（3.8s 音频 1.7s 合成完） |
 | WS 回归（scripts/ws_regression.py） | 9/9：语音 turn 全事件序 ✓；打断后 turn 递增、旧音频零迟到帧 ✓；网关日志坐实 `SSE client disconnected; interrupted agent task` |
 | 单测 | tests/test_sentencer.py 9/9 |
 | 服务足迹 | whisper.cpp 常驻约 0.7GB；按需启动，停服 `kill $(cat tmp/server.pid)` |
