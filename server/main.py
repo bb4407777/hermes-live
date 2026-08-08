@@ -44,12 +44,19 @@ def _sanitize_name(raw: str) -> str:
     return base or "file"
 
 
-async def handle_upload(request: web.Request) -> web.Response:
-    """POST /api/files/upload?name=<urlencoded原名>，raw body 直收流（areco 同构）。
-    响应 {ok, data:{path, size}}；前端把 path 当纯文本回填输入框，无附件字段。"""
+def _check_token(request: web.Request) -> None:
+    """回环免 token（壳/本机浏览器打开的页面不带 token）；外部地址必须带对。"""
+    if request.remote in ("127.0.0.1", "::1"):
+        return
     cfg = request.app["cfg"]
     if cfg.auth_token and request.query.get("token") != cfg.auth_token:
         raise web.HTTPUnauthorized(text="bad token")
+
+
+async def handle_upload(request: web.Request) -> web.Response:
+    """POST /api/files/upload?name=<urlencoded原名>，raw body 直收流（areco 同构）。
+    响应 {ok, data:{path, size}}；前端把 path 当纯文本回填输入框，无附件字段。"""
+    _check_token(request)
     base = _sanitize_name(request.query.get("name", "file"))
     day = time.strftime("%Y-%m-%d")
     dir_ = PROJECT_ROOT / "tmp" / "uploads" / day
@@ -111,9 +118,7 @@ async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue) -> None:
 
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
-    cfg = request.app["cfg"]
-    if cfg.auth_token and request.query.get("token") != cfg.auth_token:
-        raise web.HTTPUnauthorized(text="bad token")
+    _check_token(request)
     ws = web.WebSocketResponse(heartbeat=30, max_msg_size=4 * 1024 * 1024)
     await ws.prepare(request)
     app = request.app

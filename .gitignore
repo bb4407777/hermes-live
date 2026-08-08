@@ -6,3 +6,4 @@ models/
 *.log
 .DS_Store
 tmp/
+macos/.build/

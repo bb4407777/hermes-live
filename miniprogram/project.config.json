@@ -1,0 +1,13 @@
+{
+  "compileType": "miniprogram",
+  "appid": "wxa5b11d3d8b80b07b",
+  "projectname": "hermes-live",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": false,
+    "minified": true,
+    "coverView": true
+  },
+  "libVersion": "3.0.0"
+}

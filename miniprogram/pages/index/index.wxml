@@ -1,0 +1,37 @@
+<view class="page">
+  <view class="topbar">
+    <view class="orb {{state}}"></view>
+    <text class="state">{{stateLabel}}</text>
+    <text class="conn">{{connected ? '已连接' : '未连接'}}</text>
+    <view class="spacer"></view>
+    <button class="mini" size="mini" bindtap="newSession">新会话</button>
+    <button class="mini" size="mini" bindtap="openSetup">设置</button>
+  </view>
+
+  <scroll-view class="transcript" scroll-y scroll-into-view="{{scrollInto}}" scroll-with-animation>
+    <view wx:for="{{messages}}" wx:key="id" id="m{{item.id}}" class="bubble {{item.cls}}">{{item.text}}</view>
+    <view class="pad"></view>
+  </scroll-view>
+
+  <view class="footer">
+    <button class="talk {{running ? 'on' : ''}}" bindtap="toggle">{{running ? '停止' : '开始对话'}}</button>
+    <button class="stop" disabled="{{!canInterrupt}}" bindtap="interrupt">打断</button>
+  </view>
+  <view class="footer">
+    <input class="textin" value="{{textIn}}" bindinput="onInput" bindconfirm="sendText"
+           confirm-type="send" placeholder="也可以打字…" placeholder-class="ph"/>
+    <button class="send" size="mini" bindtap="sendText">发送</button>
+  </view>
+
+  <view class="mask" wx:if="{{showSetup}}">
+    <view class="dialog">
+      <view class="dtitle">连接 Mac 上的 Hermes-live</view>
+      <input class="dinput" value="{{server}}" bindinput="onServerInput"
+             placeholder="ws://192.168.x.x:8698 或 ws://100.x.x.x:8698" placeholder-class="ph"/>
+      <input class="dinput" value="{{token}}" bindinput="onTokenInput"
+             placeholder="token（服务端 config.yaml 的 auth_token，没设可留空）" placeholder-class="ph"/>
+      <view class="dtip">局域网填 Mac 内网 IP；在外面 4G 用 Tailscale 填 100.x 地址。</view>
+      <button class="dsave" bindtap="saveSetup">保存</button>
+    </view>
+  </view>
+</view>

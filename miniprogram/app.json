@@ -1,0 +1,12 @@
+{
+  "pages": ["pages/index/index"],
+  "window": {
+    "navigationBarTitleText": "哈尔密斯",
+    "navigationBarBackgroundColor": "#0d1117",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0d1117",
+    "backgroundColorTop": "#0d1117",
+    "backgroundColorBottom": "#0d1117"
+  },
+  "lazyCodeLoading": "requiredComponents"
+}

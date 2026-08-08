@@ -1,0 +1,39 @@
+/* 深色主题，与 web/index.html 同一套配色 */
+page { background: #0d1117; color: #e6edf3; height: 100%; }
+.page { display: flex; flex-direction: column; height: 100vh; }
+
+.topbar { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 24rpx; border-bottom: 1rpx solid #21262d; }
+.orb { width: 28rpx; height: 28rpx; border-radius: 50%; background: #30363d; transition: background .2s; }
+.orb.listening { background: #2ea043; }
+.orb.thinking  { background: #d29922; }
+.orb.speaking  { background: #1f6feb; }
+.state { font-size: 26rpx; }
+.conn { font-size: 22rpx; color: #8b949e; margin-left: 8rpx; }
+.spacer { flex: 1; }
+.mini { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; margin-left: 8rpx; }
+
+.transcript { flex: 1; padding: 16rpx 24rpx; box-sizing: border-box; }
+.bubble { max-width: 82%; padding: 14rpx 20rpx; border-radius: 16rpx; margin: 10rpx 0;
+          font-size: 28rpx; line-height: 1.5; word-break: break-all; white-space: pre-wrap; width: fit-content; }
+.bubble.user  { background: #1f6feb; margin-left: auto; }
+.bubble.agent { background: #161b22; border: 1rpx solid #21262d; margin-right: auto; }
+.bubble.tool  { color: #8b949e; font-size: 24rpx; background: none; padding: 0 8rpx; }
+.bubble.error { color: #f85149; font-size: 24rpx; background: none; margin: 10rpx auto; }
+.pad { height: 20rpx; }
+
+.footer { display: flex; gap: 16rpx; padding: 12rpx 24rpx; align-items: center; }
+.talk { flex: 1; background: #238636; color: #fff; }
+.talk.on { background: #da3633; }
+.stop { width: 180rpx; background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; }
+.textin { flex: 1; background: #161b22; border: 1rpx solid #21262d; border-radius: 12rpx;
+          padding: 12rpx 20rpx; font-size: 28rpx; color: #e6edf3; }
+.ph { color: #8b949e; }
+.send { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; }
+
+.mask { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; }
+.dialog { width: 84%; background: #161b22; border: 1rpx solid #21262d; border-radius: 20rpx; padding: 32rpx; }
+.dtitle { font-size: 30rpx; font-weight: 600; margin-bottom: 24rpx; }
+.dinput { background: #0d1117; border: 1rpx solid #21262d; border-radius: 12rpx;
+          padding: 14rpx 20rpx; font-size: 26rpx; color: #e6edf3; margin-bottom: 16rpx; }
+.dtip { font-size: 22rpx; color: #8b949e; margin-bottom: 24rpx; }
+.dsave { background: #238636; color: #fff; }
