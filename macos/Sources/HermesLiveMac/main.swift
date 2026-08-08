@@ -99,8 +99,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
             popover.performClose(nil)
         } else if let button = statusItem.button {
             adoptWebViewIntoPopover()
+            // accessory 进程不激活就收不到键盘事件——打字会进上一个前台 app（输入框"打不出字"的根因）
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            if let win = popover.contentViewController?.view.window {
+                win.makeKey()
+                win.makeFirstResponder(webView)
+            }
         }
     }
 

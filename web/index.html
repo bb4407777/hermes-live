@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Hermes-live</title>
 <style>
+  :root { color-scheme: dark; }
   :root {
     --bg: #0d1117; --panel: #161b22; --line: #21262d;
     --fg: #e6edf3; --dim: #8b949e; --user: #1f6feb; --err: #f85149;
@@ -68,7 +70,9 @@
   }
   #textIn {
     flex: 1; background: var(--panel); color: var(--fg);
+    -webkit-appearance: none; -webkit-text-fill-color: var(--fg); caret-color: var(--fg);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px;
+    min-width: 0;
   }
   #textIn:focus { outline: none; border-color: var(--user); }
   #btnAttach { padding: 8px 10px; }

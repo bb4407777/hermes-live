@@ -1,6 +1,6 @@
 version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
 options: "8ab8a74078718d9d18f6d1657c3894fc5ef5799e79dc14c8e2e4fe4ef421ba84"
-build_start_time: [1786161617, 624249000]
-build_end_time: [1786161619, 496631000]
+build_start_time: [1786163647, 781558000]
+build_end_time: [1786163649, 107417000]
 inputs:
-  "/Users/gao/Code/hermes-live/macos/Sources/HermesLiveMac/main.swift": [1786160115, 792730827]
+  "/Users/gao/Code/hermes-live/macos/Sources/HermesLiveMac/main.swift": [1786162225, 326883363]
