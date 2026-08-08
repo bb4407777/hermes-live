@@ -21,6 +21,11 @@ cd ~/Code/hermes-live
 浏览器（Safari/Chrome 均可）打开 `http://127.0.0.1:8698`，点「开始对话」授权麦克风即聊。
 按需启动、用完 Ctrl+C 停，不做常驻（16GB 内存让步）。
 
+**菜单栏版（推荐日用）**：`macos/build-app.sh` 一键构建 → `~/Applications/Hermes-Live.app`。
+壳自己拉起/守护 python 服务（退出时只杀自己拉的），左键弹语音面板、右键菜单；面板关掉对话不断。
+ad-hoc 签名，重编译后首次开麦会重新弹麦克风授权（钥匙串装了开发证书则自动改用、权限不掉）。
+手机上用：见 `docs/mobile.md`（Tailscale + 网页零开发路线）。给网关提速的待办：`docs/hermes-toolset-proposal.md`。
+
 - 配置：`cp config.yaml.example config.yaml` 后改（音色/ASR 档位/VAD 阈值等，全部键见 `server/config.py`）。
 - 终端模式（无浏览器）：`.venv/bin/python -m cli.m0_pipeline --mic`（半双工；终端 App 需麦克风权限）。
 - 会话：与微信通道天然隔离（platform=api_server 独立会话空间）；「新会话」按钮重开；页面刷新不断会话。

@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class TTSEngine:
+    # 注：曾试过 thinking 期预热（微合成暖链路），实测首包 0.98s→0.95s 无收益已撤——
+    # edge-tts 每次 Communicate 新开 wss，预热暖不到它的连接。
     def __init__(self, cfg: Config):
         self.cfg = cfg
 

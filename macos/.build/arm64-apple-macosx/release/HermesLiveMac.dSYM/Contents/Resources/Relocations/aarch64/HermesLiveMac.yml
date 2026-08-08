@@ -1,0 +1,57 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/gao/Code/hermes-live/macos/.build/arm64-apple-macosx/release/HermesLiveMac'
+relocations:
+  - { offset: 0xF44AD, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac10SERVER_URL10Foundation0E0Vvp', symObjAddr: 0x108F8, symBinAddr: 0x10000CC00, symSize: 0x0 }
+  - { offset: 0xF44C7, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11PROJECT_DIRSSvp', symObjAddr: 0x10910, symBinAddr: 0x10000CC18, symSize: 0x0 }
+  - { offset: 0xF44E1, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac3appSo13NSApplicationCvp', symObjAddr: 0x10920, symBinAddr: 0x10000CC28, symSize: 0x0 }
+  - { offset: 0xF44FB, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac8delegateAA11AppDelegateCvp', symObjAddr: 0x10928, symBinAddr: 0x10000CC30, symSize: 0x0 }
+  - { offset: 0xF4826, size: 0x8, addend: 0x0, symName: _HermesLiveMac_main, symObjAddr: 0x0, symBinAddr: 0x1000011E8, symSize: 0x2B4 }
+  - { offset: 0xF48FA, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledName, symObjAddr: 0x2B4, symBinAddr: 0x10000149C, symSize: 0x44 }
+  - { offset: 0xF490E, size: 0x8, addend: 0x0, symName: ___swift_allocate_value_buffer, symObjAddr: 0x2F8, symBinAddr: 0x1000014E0, symSize: 0x40 }
+  - { offset: 0xF4922, size: 0x8, addend: 0x0, symName: ___swift_project_value_buffer, symObjAddr: 0x338, symBinAddr: 0x100001520, symSize: 0x18 }
+  - { offset: 0xF4A12, size: 0x8, addend: 0x0, symName: '_$sSo7NSTimerCIeghg_ABIeyBhy_TR', symObjAddr: 0x2064, symBinAddr: 0x10000324C, symSize: 0x4C }
+  - { offset: 0xF4A2A, size: 0x8, addend: 0x0, symName: '_$sIeg_IeyB_TR', symObjAddr: 0x22E0, symBinAddr: 0x1000034C8, symSize: 0x2C }
+  - { offset: 0xF4A42, size: 0x8, addend: 0x0, symName: '_$s10Foundation4DataVSgSo13NSURLResponseCSgs5Error_pSgIeghggg_So6NSDataCSgAGSo7NSErrorCSgIeyBhyyy_TR', symObjAddr: 0x230C, symBinAddr: 0x1000034F4, symSize: 0xC8 }
+  - { offset: 0xF4A5A, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateCfETo', symObjAddr: 0x24E4, symBinAddr: 0x1000036CC, symSize: 0x68 }
+  - { offset: 0xF4A94, size: 0x8, addend: 0x0, symName: '_$ss22__RawDictionaryStorageC4findys10_HashTableV6BucketV6bucket_Sb5foundtxSHRzlFSS_Tg5', symObjAddr: 0x254C, symBinAddr: 0x100003734, symSize: 0x64 }
+  - { offset: 0xF4AC1, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateCMa', symObjAddr: 0x25B0, symBinAddr: 0x100003798, symSize: 0x20 }
+  - { offset: 0xF4AF6, size: 0x8, addend: 0x0, symName: '_$ss22__RawDictionaryStorageC4find_9hashValues10_HashTableV6BucketV6bucket_Sb5foundtx_SitSHRzlFSS_Tg5', symObjAddr: 0x25D0, symBinAddr: 0x1000037B8, symSize: 0xE0 }
+  - { offset: 0xF4B6E, size: 0x8, addend: 0x0, symName: '_$ss12_ArrayBufferV19_getElementSlowPathyyXlSiFSo10NSMenuItemC_Tg5', symObjAddr: 0x26B0, symBinAddr: 0x100003898, symSize: 0x1D4 }
+  - { offset: 0xF4BEF, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC12ensureServer33_DE8ADA5ACD3FD8777853436C317E2080LLyyFySbcfU_TA', symObjAddr: 0x28A8, symBinAddr: 0x100003A90, symSize: 0x8 }
+  - { offset: 0xF4C03, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC11healthCheck33_DE8ADA5ACD3FD8777853436C317E2080LLyyySbcFy10Foundation4DataVSg_So13NSURLResponseCSgs5Error_pSgtYbcfU_TA', symObjAddr: 0x2B20, symBinAddr: 0x100003D08, symSize: 0xC }
+  - { offset: 0xF4C17, size: 0x8, addend: 0x0, symName: _block_copy_helper, symObjAddr: 0x2B2C, symBinAddr: 0x100003D14, symSize: 0x10 }
+  - { offset: 0xF4C2B, size: 0x8, addend: 0x0, symName: _block_destroy_helper, symObjAddr: 0x2B3C, symBinAddr: 0x100003D24, symSize: 0x8 }
+  - { offset: 0xF4C3F, size: 0x8, addend: 0x0, symName: '_$s10Foundation4DataVSgWOe', symObjAddr: 0x2B44, symBinAddr: 0x100003D2C, symSize: 0x14 }
+  - { offset: 0xF4C53, size: 0x8, addend: 0x0, symName: '_$s10Foundation4DataV15_RepresentationOWOe', symObjAddr: 0x2B58, symBinAddr: 0x100003D40, symSize: 0x40 }
+  - { offset: 0xF4C67, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC11healthCheck33_DE8ADA5ACD3FD8777853436C317E2080LLyyySbcFy10Foundation4DataVSg_So13NSURLResponseCSgs5Error_pSgtYbcfU_yyScMYccfU_TA', symObjAddr: 0x2BBC, symBinAddr: 0x100003DA4, symSize: 0x28 }
+  - { offset: 0xF4C9B, size: 0x8, addend: 0x0, symName: '_$s8Dispatch0A13WorkItemFlagsVACs10SetAlgebraAAWl', symObjAddr: 0x2BE4, symBinAddr: 0x100003DCC, symSize: 0x44 }
+  - { offset: 0xF4CAF, size: 0x8, addend: 0x0, symName: '_$sSay8Dispatch0A13WorkItemFlagsVGSayxGSTsWl', symObjAddr: 0x2C28, symBinAddr: 0x100003E10, symSize: 0x48 }
+  - { offset: 0xF4CC3, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledNameAbstract, symObjAddr: 0x2C70, symBinAddr: 0x100003E58, symSize: 0x48 }
+  - { offset: 0xF4CD7, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13waitForServer33_DE8ADA5ACD3FD8777853436C317E2080LL8deadliney10Foundation4DateV_tFySo7NSTimerCYbcfU_TA', symObjAddr: 0x2D24, symBinAddr: 0x100003F0C, symSize: 0x40 }
+  - { offset: 0xF4CEB, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13waitForServer33_DE8ADA5ACD3FD8777853436C317E2080LL8deadliney10Foundation4DateV_tFySo7NSTimerCYbcfU_ySbcfU_TA', symObjAddr: 0x2DD8, symBinAddr: 0x100003FC0, symSize: 0x40 }
+  - { offset: 0xF4CFF, size: 0x8, addend: 0x0, symName: ___swift_project_boxed_opaque_existential_0, symObjAddr: 0x2E58, symBinAddr: 0x100004040, symSize: 0x24 }
+  - { offset: 0xF4D13, size: 0x8, addend: 0x0, symName: ___swift_destroy_boxed_opaque_existential_0, symObjAddr: 0x2E7C, symBinAddr: 0x100004064, symSize: 0x20 }
+  - { offset: 0xF5077, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC15setupStatusItem33_DE8ADA5ACD3FD8777853436C317E2080LLyyF', symObjAddr: 0x350, symBinAddr: 0x100001538, symSize: 0x1B4 }
+  - { offset: 0xF522B, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC12setupWebView33_DE8ADA5ACD3FD8777853436C317E2080LLyyF', symObjAddr: 0x504, symBinAddr: 0x1000016EC, symSize: 0x248 }
+  - { offset: 0xF5498, size: 0x8, addend: 0x0, symName: '_$sSo12NSFileHandleC12forWritingToAB10Foundation3URLV_tKcfCTO', symObjAddr: 0x1B50, symBinAddr: 0x100002D38, symSize: 0x124 }
+  - { offset: 0xF54EB, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC29applicationDidFinishLaunchingyy10Foundation12NotificationVFTo', symObjAddr: 0x74C, symBinAddr: 0x100001934, symSize: 0xEC }
+  - { offset: 0xF5579, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC24applicationWillTerminateyy10Foundation12NotificationVFTo', symObjAddr: 0x838, symBinAddr: 0x100001A20, symSize: 0xE0 }
+  - { offset: 0xF5625, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC17statusItemClicked33_DE8ADA5ACD3FD8777853436C317E2080LLyyF', symObjAddr: 0x918, symBinAddr: 0x100001B00, symSize: 0x4F8 }
+  - { offset: 0xF5863, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC17statusItemClicked33_DE8ADA5ACD3FD8777853436C317E2080LLyyFTo', symObjAddr: 0xE10, symBinAddr: 0x100001FF8, symSize: 0x28 }
+  - { offset: 0xF588B, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13openInBrowser33_DE8ADA5ACD3FD8777853436C317E2080LLyyFTo', symObjAddr: 0xE38, symBinAddr: 0x100002020, symSize: 0x114 }
+  - { offset: 0xF58CC, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC10reloadPage33_DE8ADA5ACD3FD8777853436C317E2080LLyyFTo', symObjAddr: 0xF4C, symBinAddr: 0x100002134, symSize: 0x5C }
+  - { offset: 0xF5921, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC4quit33_DE8ADA5ACD3FD8777853436C317E2080LLyyFTo', symObjAddr: 0xFA8, symBinAddr: 0x100002190, symSize: 0x24 }
+  - { offset: 0xF5939, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC4quit33_DE8ADA5ACD3FD8777853436C317E2080LLyyFTo', symObjAddr: 0xFA8, symBinAddr: 0x100002190, symSize: 0x24 }
+  - { offset: 0xF59C6, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC7webView_32requestMediaCapturePermissionFor16initiatedByFrame4type15decisionHandlerySo05WKWebG0C_So16WKSecurityOriginCSo11WKFrameInfoCSo07WKMediaJ4TypeVySo20WKPermissionDecisionVctFTo', symObjAddr: 0xFCC, symBinAddr: 0x1000021B4, symSize: 0xA8 }
+  - { offset: 0xF5A39, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC12ensureServer33_DE8ADA5ACD3FD8777853436C317E2080LLyyFySbcfU_', symObjAddr: 0x1074, symBinAddr: 0x10000225C, symSize: 0x24C }
+  - { offset: 0xF5AC9, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC11spawnServer33_DE8ADA5ACD3FD8777853436C317E2080LLyyF', symObjAddr: 0x12C0, symBinAddr: 0x1000024A8, symSize: 0x6EC }
+  - { offset: 0xF5EE2, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13waitForServer33_DE8ADA5ACD3FD8777853436C317E2080LL8deadliney10Foundation4DateV_tF', symObjAddr: 0x19AC, symBinAddr: 0x100002B94, symSize: 0x1A4 }
+  - { offset: 0xF5F16, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13waitForServer33_DE8ADA5ACD3FD8777853436C317E2080LL8deadliney10Foundation4DateV_tFySo7NSTimerCYbcfU_', symObjAddr: 0x1C74, symBinAddr: 0x100002E5C, symSize: 0x138 }
+  - { offset: 0xF5F89, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC13waitForServer33_DE8ADA5ACD3FD8777853436C317E2080LL8deadliney10Foundation4DateV_tFySo7NSTimerCYbcfU_ySbcfU_', symObjAddr: 0x1DAC, symBinAddr: 0x100002F94, symSize: 0x2B8 }
+  - { offset: 0xF6133, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC11healthCheck33_DE8ADA5ACD3FD8777853436C317E2080LLyyySbcFy10Foundation4DataVSg_So13NSURLResponseCSgs5Error_pSgtYbcfU_', symObjAddr: 0x20B0, symBinAddr: 0x100003298, symSize: 0x230 }
+  - { offset: 0xF61D6, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateCACycfc', symObjAddr: 0x23D4, symBinAddr: 0x1000035BC, symSize: 0xBC }
+  - { offset: 0xF621E, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateCACycfcTo', symObjAddr: 0x2490, symBinAddr: 0x100003678, symSize: 0x20 }
+  - { offset: 0xF6232, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateCfD', symObjAddr: 0x24B0, symBinAddr: 0x100003698, symSize: 0x34 }
+  - { offset: 0xF625C, size: 0x8, addend: 0x0, symName: '_$s13HermesLiveMac11AppDelegateC11healthCheck33_DE8ADA5ACD3FD8777853436C317E2080LLyyySbcFTf4nd_n', symObjAddr: 0x28B0, symBinAddr: 0x100003A98, symSize: 0x24C }
+...

@@ -235,9 +235,11 @@ class Session:
                 yielded = False
                 for attempt in (1, 2):
                     try:
-                        async for pcm in self.tts.synth_stream(sentence):
-                            yielded = True
-                            chunks.put_nowait(pcm)
+                        # aclosing：取消/异常时显式关掉 edge-tts 流，防挂起任务告警
+                        async with contextlib.aclosing(self.tts.synth_stream(sentence)) as gen:
+                            async for pcm in gen:
+                                yielded = True
+                                chunks.put_nowait(pcm)
                         break
                     except asyncio.CancelledError:
                         raise
