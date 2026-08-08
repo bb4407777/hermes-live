@@ -232,8 +232,20 @@ class Session:
 
         async def synth_to_queue(sentence: str, chunks: asyncio.Queue) -> None:
             try:
-                async for pcm in self.tts.synth_stream(sentence):
-                    chunks.put_nowait(pcm)
+                yielded = False
+                for attempt in (1, 2):
+                    try:
+                        async for pcm in self.tts.synth_stream(sentence):
+                            yielded = True
+                            chunks.put_nowait(pcm)
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        # 半句失败不重试（音频会跳段）；整句未出声则单次重试
+                        if yielded or attempt == 2:
+                            raise
+                        logger.warning("edge-tts 失败重试一次: %s", exc)
             finally:
                 chunks.put_nowait(None)
 

@@ -30,6 +30,10 @@
   button:hover { border-color: var(--dim); }
   button.primary { background: var(--user); border-color: var(--user); }
   button:disabled { opacity: .4; cursor: default; }
+  select {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 8px; font-size: 13px;
+  }
 
   #stage { display: flex; flex-direction: column; align-items: center; padding: 26px 0 10px; }
   #orb {
@@ -70,6 +74,18 @@
     <h1>Hermes-live</h1>
     <span id="status">未连接</span>
     <span class="spacer"></span>
+    <select id="selVoice" title="音色">
+      <option value="zh-CN-XiaoxiaoNeural">晓晓（女）</option>
+      <option value="zh-CN-YunxiNeural">云希（男）</option>
+      <option value="zh-CN-XiaoyiNeural">晓伊（女）</option>
+      <option value="zh-CN-YunjianNeural">云健（男）</option>
+    </select>
+    <select id="selRate" title="语速">
+      <option value="+0%">语速 1.0x</option>
+      <option value="+15%">语速 1.15x</option>
+      <option value="+30%">语速 1.3x</option>
+      <option value="-15%">语速 0.85x</option>
+    </select>
     <button id="btnInterrupt" disabled>打断</button>
     <button id="btnNewSession">新会话</button>
     <button id="btnToggle" class="primary">开始对话</button>

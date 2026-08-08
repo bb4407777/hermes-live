@@ -11,6 +11,8 @@ const els = {
   btnNewSession: document.getElementById('btnNewSession'),
   textIn: document.getElementById('textIn'),
   btnSend: document.getElementById('btnSend'),
+  selVoice: document.getElementById('selVoice'),
+  selRate: document.getElementById('selRate'),
 };
 
 const STATE_LABEL = {
@@ -178,5 +180,11 @@ function sendText() {
 }
 els.btnSend.addEventListener('click', sendText);
 els.textIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendText(); });
+
+function pushConfig() {
+  sendJson({ type: 'set_config', voice: els.selVoice.value, tts_rate: els.selRate.value });
+}
+els.selVoice.addEventListener('change', pushConfig);
+els.selRate.addEventListener('change', pushConfig);
 
 setState('idle');
