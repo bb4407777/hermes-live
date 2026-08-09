@@ -21,9 +21,7 @@ cd ~/Code/hermes-live
 浏览器（Safari/Chrome 均可）打开 `http://127.0.0.1:8698`，点「开始对话」授权麦克风即聊。
 按需启动、用完 Ctrl+C 停，不做常驻（16GB 内存让步）。
 
-**菜单栏版（推荐日用）**：`macos/build-app.sh` 一键构建 → `~/Applications/Hermes-Live.app`。
-壳自己拉起/守护 python 服务（退出时只杀自己拉的），左键弹语音面板、右键菜单；面板关掉对话不断。
-ad-hoc 签名，重编译后首次开麦会重新弹麦克风授权（钥匙串装了开发证书则自动改用、权限不掉）。
+~~菜单栏版~~（2026-08-09 已弃用删除）：WKWebView 壳缓存页面不及时，直接用网页版即可。
 手机上用两条路：`docs/mobile.md`（Tailscale + 网页零开发）或 `ios/README-ios.md`（免费个人签真 app，
 工程已生成好，装 Xcode 后双击 `ios/HermesLive.xcodeproj` 即可跑；Mac 侧需 config.yaml 配
 `host: 0.0.0.0` + `auth_token`）。给网关提速的配置已落待重启：`docs/hermes-toolset-proposal.md`。
@@ -56,9 +54,7 @@ scripts/smoke.sh                          # 冒烟：健康检查 + edge-tts + �
 - 状态机 `idle→listening→thinking→speaking`：thinking 忽略麦克风（防噪声误取消）；speaking 全双工，VAD 高门槛档（概率≥0.85 持续 320ms）触发打断，pre-roll 500ms 保住打断句开头。
 - 分句器带首句加速（≥10 字遇逗号即切）压首包延迟；markdown/代码块清洗后再进 TTS。
 - 每轮请求附带 system 消息注入「口语化短句」风格（网关将其临时叠加，不改 Hermes 配置）。
-- 前端只用 getUserMedia / WebSocket / AudioWorklet（Safari 14.1+），为 M3 菜单栏 WKWebView 壳预留：
-  NSStatusItem + NSPopover 内嵌 WKWebView 指向 8698，`NSMicrophoneUsageDescription` + audio-input entitlement +
-  `WKUIDelegate.requestMediaCapturePermissionFor` 回 `.grant`；免费 Xcode CLT + ad-hoc 签名即可（同 gpt-live build-app.sh 做法），无需付费开发者账号。
+- 前端只用 getUserMedia / WebSocket / AudioWorklet（Safari 14.1+），iOS 壳同套页面回环托管复用。
 
 ## 依赖与备胎
 
