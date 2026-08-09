@@ -21,6 +21,7 @@ Page({
     connected: false, running: false,
     state: 'idle', stateLabel: '待机',
     canInterrupt: false,
+    partialText: '',
     messages: [],
     textIn: '',
     scrollInto: '',
@@ -123,6 +124,7 @@ Page({
         this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: st === 'thinking' || st === 'speaking' });
         if (msg.turn !== undefined) this._player.setTurn(msg.turn);
         // 半双工：speaking 时停录（防喇叭回声进麦），listening 时恢复
+        if (st !== 'listening') this.setData({ partialText: '' });
         if (st === 'speaking') {
           this._rec && this._rec.pause();
         } else if (st === 'listening') {
@@ -130,7 +132,13 @@ Page({
         }
         break;
       }
-      case 'asr_final': this._addMsg('user', msg.text); break;
+      case 'asr_partial':
+        this.setData({ partialText: msg.text });
+        break;
+      case 'asr_final':
+        this.setData({ partialText: '' });
+        this._addMsg('user', msg.text);
+        break;
       case 'agent_delta': {
         if (this._agentTurn !== msg.turn || this._agentMsgId === null) {
           this._agentMsgId = this._addMsg('agent', '');

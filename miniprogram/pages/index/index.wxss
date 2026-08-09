@@ -33,6 +33,8 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .orb.speaking  { filter: hue-rotate(-25deg); animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
 @keyframes breathe { 50% { transform: scale(1.08); } }
 .orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
+.partial-text { font-size: 26rpx; color: #e6edf3; opacity: .65; font-style: italic;
+                margin-top: 14rpx; padding: 0 40rpx; text-align: center; max-width: 100%; }
 
 /* 对话记录 */
 .transcript { flex: 1; padding: 16rpx 24rpx; box-sizing: border-box; }
