@@ -16,6 +16,7 @@ const els = {
   btnAttach: document.getElementById('btnAttach'),
   fileIn: document.getElementById('fileIn'),
   dropOverlay: document.getElementById('dropOverlay'),
+  partialText: document.getElementById('partialText'),
 };
 
 const STATE_LABEL = {
@@ -78,6 +79,7 @@ function setState(state, turn) {
   els.orb.className = state;
   els.stateLabel.textContent = STATE_LABEL[state] || state;
   els.btnInterrupt.disabled = !(state === 'thinking' || state === 'speaking');
+  if (state !== 'listening') els.partialText.textContent = '';
   if (turn !== undefined && turn !== curTurn) {
     curTurn = turn;
     audio.setTurn(turn);   // 清播放缓冲：旧 turn 音频作废
@@ -92,7 +94,11 @@ function handleMessage(msg) {
     case 'state':
       setState(msg.state, msg.turn);
       break;
+    case 'asr_partial':
+      els.partialText.textContent = msg.text;
+      break;
     case 'asr_final':
+      els.partialText.textContent = '';
       addBubble('user', msg.text);
       break;
     case 'agent_delta':

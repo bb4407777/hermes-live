@@ -50,6 +50,7 @@ class Session:
         self.listen_ignore_until = 0.0   # 回声忽略窗
         self.barge_cooldown_until = 0.0
         self.playback_done: dict[int, asyncio.Event] = {}
+        self._last_partial: str = ""   # 流式 ASR 上一帧的中间文本（防重复发送）
         self.closed = False
 
     # ---------- 出站 ----------
@@ -74,9 +75,12 @@ class Session:
         if self.state == "listening":
             if time.monotonic() < self.listen_ignore_until:
                 return
-            # 流式 ASR：逐帧喂，VAD 触发后结果即时可取（RTF≈0.05，同步不阻塞）
+            # 流式 ASR：逐帧喂，中间结果推给前端实时显示
             if self.asr_stream is not None:
-                self.asr_stream.feed(pcm)
+                partial = self.asr_stream.feed(pcm)
+                if partial and partial != self._last_partial:
+                    self._last_partial = partial
+                    self.send_json("asr_partial", text=partial)
             ev = self.segmenter.feed(pcm)
             if ev and ev[0] == "end" and ev[1]:
                 self._begin_turn(pcm_utt=ev[1].pcm)
@@ -133,6 +137,7 @@ class Session:
 
     def _enter_listening(self, echo_guard: bool = False) -> None:
         self.segmenter.reset()
+        self._last_partial = ""
         if self.asr_stream is not None:
             self.asr_stream.reset()
         if echo_guard:
