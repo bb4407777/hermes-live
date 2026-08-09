@@ -4,6 +4,6 @@
 App({
   globalData: {
     server: wx.getStorageSync('hl_server') || 'wss://live.gaochengbin.com',
-    token:  wx.getStorageSync('hl_token')  || '6ce0c106f25085ae0d71d76d2eb241b6'
+    token:  wx.getStorageSync('hl_token')  || ''   // 留空：首次进设置手动填 token
   }
 });
