@@ -36,10 +36,6 @@
     <view class="pad"></view>
   </scroll-view>
 
-  <!-- 按住说话（PTT：只有按住时才采集上行，松手即收口发 turn） -->
-  <view class="ptt {{holding ? 'holding' : ''}}"
-        bindtouchstart="pttDown" bindtouchend="pttUp" bindtouchcancel="pttUp">{{holding ? '松开 发送' : '按住 说话'}}</view>
-
   <!-- 文字输入 -->
   <view class="footer">
     <input class="textin" value="{{textIn}}" bindinput="onInput" bindconfirm="sendText"
