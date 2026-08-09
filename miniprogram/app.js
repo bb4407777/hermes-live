@@ -3,8 +3,8 @@
 //   上行 0x01 + PCM16LE 16k（1024B/帧）；下行 0x01 + turn(u8) + PCM16LE 24k。
 App({
   globalData: {
-    // 默认连 Mac 的局域网地址，设置页可改（Tailscale 下填 ws://100.x.x.x:8698）
-    server: wx.getStorageSync('hl_server') || '',
+    // 默认走 Cloudflare Tunnel（wss，无需局域网），首次进入设置可改
+    server: wx.getStorageSync('hl_server') || 'wss://live.gaochengbin.com',
     token: wx.getStorageSync('hl_token') || ''
   }
 });
