@@ -27,6 +27,7 @@
       <view class="orb {{state}}"></view>
     </view>
     <text class="orb-label">{{running ? '点击停止' : '点击开始'}}</text>
+    <text class="partial-text" wx:if="{{partialText}}">{{partialText}}</text>
   </view>
 
   <!-- 对话记录 -->

@@ -3,8 +3,7 @@
 //   上行 0x01 + PCM16LE 16k（1024B/帧）；下行 0x01 + turn(u8) + PCM16LE 24k。
 App({
   globalData: {
-    // 默认走 Cloudflare Tunnel（wss，无需局域网），首次进入设置可改
     server: wx.getStorageSync('hl_server') || 'wss://live.gaochengbin.com',
-    token: wx.getStorageSync('hl_token') || ''
+    token:  wx.getStorageSync('hl_token')  || '6ce0c106f25085ae0d71d76d2eb241b6'
   }
 });
