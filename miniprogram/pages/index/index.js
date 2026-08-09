@@ -128,7 +128,11 @@ Page({
         if (st === 'speaking') {
           this._rec && this._rec.pause();
         } else if (st === 'listening') {
-          this._rec && this._rec.resume();
+          // 延迟 500ms 再开录：等喇叭输出缓冲彻底排空，防末尾音频录进麦克风
+          // （微信 WebAudio 输出延迟比浏览器大，立刻开录必然回声）
+          setTimeout(() => {
+            if (this.data.state === 'listening' && this._rec) this._rec.resume();
+          }, 500);
         }
         break;
       }

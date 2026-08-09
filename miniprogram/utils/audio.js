@@ -109,12 +109,13 @@ class Player {
     this._sources.push(src);
     if (this._sources.length > 64) this._sources.splice(0, 32); // 已播完的引用不必全留
 
-    // 欠载检测：最后一段播完后 ~350ms 无新帧 → 本 turn 播放结束
+    // 欠载检测：最后一段播完后 ~800ms 无新帧 → 本 turn 播放结束
+    // 微信 WebAudioContext 输出缓冲比浏览器厚，350ms 会导致 playback_done 提前触发
     if (this._doneTimer) clearTimeout(this._doneTimer);
     const capturedTurn = this.turn;
     this._doneTimer = setTimeout(() => {
       if (this.turn === capturedTurn && this._played) this.onDone(capturedTurn);
-    }, Math.max(0, (this._nextAt - this.ctx.currentTime) * 1000) + 350);
+    }, Math.max(0, (this._nextAt - this.ctx.currentTime) * 1000) + 800);
   }
 
   close() { try { this.ctx.close(); } catch (_) {} }
