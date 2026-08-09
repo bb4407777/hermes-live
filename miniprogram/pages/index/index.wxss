@@ -1,39 +1,66 @@
-/* 深色主题，与 web/index.html 同一套配色 */
-page { background: #0d1117; color: #e6edf3; height: 100%; }
+/* 与 web/index.html 同一套配色变量 */
+page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box; }
 .page { display: flex; flex-direction: column; height: 100vh; }
 
-.topbar { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 24rpx; border-bottom: 1rpx solid #21262d; }
-.orb { width: 28rpx; height: 28rpx; border-radius: 50%; background: #30363d; transition: background .2s; }
-.orb.listening { background: #2ea043; }
-.orb.thinking  { background: #d29922; }
-.orb.speaking  { background: #1f6feb; }
-.state { font-size: 26rpx; }
-.conn { font-size: 22rpx; color: #8b949e; margin-left: 8rpx; }
+/* 顶栏 */
+.topbar { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 28rpx 12rpx; border-bottom: 1rpx solid #21262d; }
+.title  { font-size: 30rpx; font-weight: 600; }
+.status { font-size: 24rpx; color: #8b949e; }
+.dot    { width: 14rpx; height: 14rpx; border-radius: 50%; background: #30363d; }
+.dot.on { background: #2ea043; }
 .spacer { flex: 1; }
-.mini { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; margin-left: 8rpx; }
+.icon-btn { font-size: 36rpx; color: #8b949e; padding: 4rpx 12rpx; }
 
+/* 控件行：音色 / 语速 / 打断 */
+.controls { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 24rpx; border-bottom: 1rpx solid #21262d; }
+.picker-wrap { display: inline-block; }
+.picker-btn  { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; border-radius: 10rpx;
+               padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; }
+.ctrl-btn    { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; border-radius: 10rpx;
+               padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; }
+.ctrl-btn.dim { color: #444d56; border-color: #21262d; }
+
+/* 语音球 */
+.orb-area  { display: flex; flex-direction: column; align-items: center; padding: 32rpx 0 20rpx; }
+.orb-wrap  { width: 160rpx; height: 160rpx; display: flex; align-items: center; justify-content: center; }
+.orb {
+  width: 140rpx; height: 140rpx; border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #58a6ff, #bc8cff 75%);
+  filter: saturate(.35) brightness(.5); transition: filter .3s;
+}
+.orb.listening { filter: none; box-shadow: 0 0 60rpx #58a6ff55; }
+.orb.thinking  { filter: hue-rotate(40deg); animation: breathe 1.4s ease-in-out infinite; }
+.orb.speaking  { filter: hue-rotate(-25deg); animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
+@keyframes breathe { 50% { transform: scale(1.08); } }
+.orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
+
+/* 对话记录 */
 .transcript { flex: 1; padding: 16rpx 24rpx; box-sizing: border-box; }
-.bubble { max-width: 82%; padding: 14rpx 20rpx; border-radius: 16rpx; margin: 10rpx 0;
-          font-size: 28rpx; line-height: 1.5; word-break: break-all; white-space: pre-wrap; width: fit-content; }
+.bubble { max-width: 84%; padding: 14rpx 22rpx; border-radius: 18rpx; margin: 10rpx 0;
+          font-size: 28rpx; line-height: 1.55; word-break: break-all; white-space: pre-wrap; }
 .bubble.user  { background: #1f6feb; margin-left: auto; }
 .bubble.agent { background: #161b22; border: 1rpx solid #21262d; margin-right: auto; }
 .bubble.tool  { color: #8b949e; font-size: 24rpx; background: none; padding: 0 8rpx; }
 .bubble.error { color: #f85149; font-size: 24rpx; background: none; margin: 10rpx auto; }
-.pad { height: 20rpx; }
+.pad { height: 16rpx; }
 
-.footer { display: flex; gap: 16rpx; padding: 12rpx 24rpx; align-items: center; }
-.talk { flex: 1; background: #238636; color: #fff; }
-.talk.on { background: #da3633; }
-.stop { width: 180rpx; background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; }
-.textin { flex: 1; background: #161b22; border: 1rpx solid #21262d; border-radius: 12rpx;
-          padding: 12rpx 20rpx; font-size: 28rpx; color: #e6edf3; }
-.ph { color: #8b949e; }
-.send { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; }
+/* 文字输入 */
+.footer   { display: flex; gap: 14rpx; padding: 14rpx 24rpx; align-items: center; border-top: 1rpx solid #21262d; }
+.textin   { flex: 1; background: #161b22; border: 1rpx solid #21262d; border-radius: 12rpx;
+            padding: 14rpx 20rpx; font-size: 28rpx; color: #e6edf3; min-width: 0; }
+.ph       { color: #8b949e; }
+.send-btn { background: #1f6feb; color: #fff; border-radius: 12rpx;
+            padding: 14rpx 28rpx; font-size: 28rpx; white-space: nowrap; }
 
-.mask { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; }
-.dialog { width: 84%; background: #161b22; border: 1rpx solid #21262d; border-radius: 20rpx; padding: 32rpx; }
-.dtitle { font-size: 30rpx; font-weight: 600; margin-bottom: 24rpx; }
-.dinput { background: #0d1117; border: 1rpx solid #21262d; border-radius: 12rpx;
-          padding: 14rpx 20rpx; font-size: 26rpx; color: #e6edf3; margin-bottom: 16rpx; }
-.dtip { font-size: 22rpx; color: #8b949e; margin-bottom: 24rpx; }
-.dsave { background: #238636; color: #fff; }
+/* 设置弹窗 */
+.mask    { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.7);
+           display: flex; align-items: center; justify-content: center; z-index: 999; }
+.dialog  { width: 86%; background: #161b22; border: 1rpx solid #30363d; border-radius: 24rpx; padding: 36rpx; }
+.dtitle  { font-size: 32rpx; font-weight: 600; margin-bottom: 28rpx; }
+.dlabel  { font-size: 24rpx; color: #8b949e; margin-bottom: 10rpx; }
+.dinput  { background: #0d1117; border: 1rpx solid #30363d; border-radius: 12rpx;
+           padding: 16rpx 20rpx; font-size: 26rpx; color: #e6edf3; margin-bottom: 20rpx; display: block; }
+.dtip    { font-size: 22rpx; color: #6e7681; margin-bottom: 28rpx; line-height: 1.5; }
+.drow    { display: flex; gap: 16rpx; }
+.dcancel { flex: 1; background: #21262d; color: #8b949e; border-radius: 12rpx; padding: 18rpx 0; font-size: 28rpx; text-align: center; }
+.dsave   { flex: 2; background: #238636; color: #fff; border-radius: 12rpx; padding: 18rpx 0; font-size: 28rpx; text-align: center; }

@@ -1,30 +1,53 @@
-// 主页面：状态机显示 + 对话流 + 语音/文字双输入。协议处理与 web/app.js 对齐。
 const { Recorder, Player } = require('../../utils/audio.js');
 
-const STATE_LABEL = { idle: '未开始', listening: '聆听中', thinking: '思考中', speaking: '说话中' };
+const STATE_LABEL = { idle: '待机', listening: '聆听中', thinking: '思考中', speaking: '说话中' };
+
+const VOICES = [
+  { label: '晓晓（女）', value: 'zh-CN-XiaoxiaoNeural' },
+  { label: '云希（男）', value: 'zh-CN-YunxiNeural' },
+  { label: '晓伊（女）', value: 'zh-CN-XiaoyiNeural' },
+  { label: '云健（男）', value: 'zh-CN-YunjianNeural' },
+];
+const RATES = [
+  { label: '1.0x', value: '+0%' },
+  { label: '1.15x', value: '+15%' },
+  { label: '1.3x', value: '+30%' },
+  { label: '0.85x', value: '-15%' },
+];
 
 Page({
   data: {
     server: '', token: '',
     connected: false, running: false,
-    state: 'idle', stateLabel: '未开始',
+    state: 'idle', stateLabel: '待机',
     canInterrupt: false,
-    messages: [],            // {id, cls: 'user'|'agent'|'tool'|'error', text}
+    messages: [],
     textIn: '',
     scrollInto: '',
-    showSetup: false
+    showSetup: false,
+    voiceIdx: 0, voiceLabels: VOICES.map(v => v.label),
+    rateIdx: 0,  rateLabels: RATES.map(r => r.label),
   },
   _ws: null, _rec: null, _player: null,
   _agentMsgId: null, _agentTurn: -1, _msgSeq: 0,
+  _connecting: false,
 
   onLoad() {
     const app = getApp();
     this.setData({
       server: app.globalData.server,
-      token: app.globalData.token,
-      showSetup: !app.globalData.server
+      token:  app.globalData.token,
+      showSetup: !app.globalData.server,
     });
     this._player = new Player((turn) => this._sendJson({ type: 'playback_done', turn }));
+    this._initRec();
+  },
+
+  onShow() {
+    // 每次进入页面自动开聊（已授权麦克风后静默开始，未授权则弹系统授权弹窗）
+    if (!this.data.running && !this._connecting && !this.data.showSetup) {
+      this._autoStart();
+    }
   },
 
   onUnload() {
@@ -32,7 +55,31 @@ Page({
     if (this._player) this._player.close();
   },
 
-  // ---------- 连接 ----------
+  // ---------- 自动开始 ----------
+  async _autoStart() {
+    this._connecting = true;
+    try {
+      if (!this._ws || !this.data.connected) await this._connect();
+      await this._rec.start();
+      this._sendJson({ type: 'start' });
+      this.setData({ running: true });
+    } catch (e) {
+      // 静默失败——用户可手动点「开始对话」
+    } finally {
+      this._connecting = false;
+    }
+  },
+
+  _initRec() {
+    this._rec = new Recorder((frame) => {
+      if (!this._ws) return;
+      const out = new Uint8Array(1 + frame.byteLength);
+      out[0] = 0x01; out.set(new Uint8Array(frame), 1);
+      this._ws.send({ data: out.buffer });
+    });
+  },
+
+  // ---------- WS 连接 ----------
   _wsUrl() {
     let s = this.data.server.trim();
     if (!/^wss?:\/\//.test(s)) s = 'ws://' + s;
@@ -45,14 +92,12 @@ Page({
       const ws = wx.connectSocket({ url });
       let opened = false;
       ws.onOpen(() => { opened = true; this._ws = ws; this.setData({ connected: true }); resolve(); });
-      ws.onError((e) => {
-        if (!opened) reject(new Error('连接失败：' + url + '\n' + (e.errMsg || '')));
-      });
+      ws.onError((e) => { if (!opened) reject(new Error(e.errMsg || url)); });
       ws.onClose(({ code, reason }) => {
         this._ws = null;
-        this.setData({ connected: false, running: false, state: 'idle', stateLabel: STATE_LABEL.idle });
+        this.setData({ connected: false, running: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
         if (this._rec) this._rec.stop();
-        if (opened && code !== 1000) this._addMsg('error', `连接断开(${code})${reason ? '：'+reason : ''}`);
+        if (opened && code !== 1000) this._addMsg('error', `连接断开(${code})${reason ? '：' + reason : ''}`);
       });
       ws.onMessage(({ data }) => {
         if (typeof data === 'string') this._handleJson(JSON.parse(data));
@@ -64,8 +109,8 @@ Page({
   _sendJson(obj) { if (this._ws) this._ws.send({ data: JSON.stringify(obj) }); },
 
   _handleBinary(buf) {
-    const view = new Uint8Array(buf);
-    if (view[0] === 0x01) this._player.play(view[1], buf.slice(2));
+    const v = new Uint8Array(buf);
+    if (v[0] === 0x01) this._player.play(v[1], buf.slice(2));
   },
 
   _handleJson(msg) {
@@ -75,16 +120,11 @@ Page({
         break;
       case 'state': {
         const st = msg.state;
-        this.setData({
-          state: st, stateLabel: STATE_LABEL[st] || st,
-          canInterrupt: st === 'thinking' || st === 'speaking'
-        });
+        this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: st === 'thinking' || st === 'speaking' });
         if (msg.turn !== undefined) this._player.setTurn(msg.turn);
         break;
       }
-      case 'asr_final':
-        this._addMsg('user', msg.text);
-        break;
+      case 'asr_final': this._addMsg('user', msg.text); break;
       case 'agent_delta': {
         if (this._agentTurn !== msg.turn || this._agentMsgId === null) {
           this._agentMsgId = this._addMsg('agent', '');
@@ -95,12 +135,8 @@ Page({
         if (m) { m.text += msg.text; this._refreshMsgs(list); }
         break;
       }
-      case 'agent_done':
-        this._agentMsgId = null;
-        break;
-      case 'error':
-        this._addMsg('error', msg.message);
-        break;
+      case 'agent_done': this._agentMsgId = null; break;
+      case 'error': this._addMsg('error', msg.message); break;
     }
   },
 
@@ -116,23 +152,18 @@ Page({
     this.setData({ messages: list, scrollInto: 'm' + this._msgSeq });
   },
 
-  // ---------- 语音 ----------
+  // ---------- 语音开关 ----------
   async toggle() {
     if (this.data.running) { this._stopAll(); return; }
+    this._connecting = true;
     try {
-      if (!this._ws) await this._connect();
-      if (!this._rec) this._rec = new Recorder((frame) => {
-        if (!this._ws) return;
-        const out = new Uint8Array(1 + frame.byteLength);
-        out[0] = 0x01; out.set(new Uint8Array(frame), 1);
-        this._ws.send({ data: out.buffer });
-      });
+      if (!this._ws || !this.data.connected) await this._connect();
       await this._rec.start();
       this._sendJson({ type: 'start' });
       this.setData({ running: true });
-    } catch (err) {
-      this._addMsg('error', '启动失败：' + (err.message || err));
-    }
+    } catch (e) {
+      this._addMsg('error', '启动失败：' + (e.message || e));
+    } finally { this._connecting = false; }
   },
 
   _stopAll() {
@@ -149,33 +180,46 @@ Page({
     this.setData({ messages: [] });
   },
 
-  // ---------- 文字 ----------
+  // ---------- 音色 / 语速 ----------
+  pushConfig() {
+    this._sendJson({
+      type: 'set_config',
+      voice: VOICES[this.data.voiceIdx].value,
+      tts_rate: RATES[this.data.rateIdx].value,
+    });
+  },
+  onVoiceChange(e) { this.setData({ voiceIdx: +e.detail.value }); this.pushConfig(); },
+  onRateChange(e)  { this.setData({ rateIdx:  +e.detail.value }); this.pushConfig(); },
+
+  // ---------- 文字输入 ----------
   onInput(e) { this.setData({ textIn: e.detail.value }); },
 
   async sendText() {
     const text = this.data.textIn.trim();
     if (!text) return;
     this.setData({ textIn: '' });
-    this._addMsg('user', text);   // 文字轮不经 ASR，气泡在发送侧渲染（与 web 端一致）
+    this._addMsg('user', text);
     try {
-      if (!this._ws) await this._connect();
+      if (!this._ws || !this.data.connected) await this._connect();
       this._sendJson({ type: 'text', text });
-    } catch (err) {
-      this._addMsg('error', err.message || String(err));
-    }
+    } catch (e) { this._addMsg('error', e.message || String(e)); }
   },
 
   // ---------- 设置 ----------
   openSetup() { this.setData({ showSetup: true }); },
   onServerInput(e) { this.setData({ server: e.detail.value }); },
-  onTokenInput(e) { this.setData({ token: e.detail.value }); },
+  onTokenInput(e)  { this.setData({ token: e.detail.value }); },
   saveSetup() {
     const app = getApp();
     app.globalData.server = this.data.server.trim();
-    app.globalData.token = this.data.token.trim();
+    app.globalData.token  = this.data.token.trim();
     wx.setStorageSync('hl_server', app.globalData.server);
-    wx.setStorageSync('hl_token', app.globalData.token);
+    wx.setStorageSync('hl_token',  app.globalData.token);
     if (this._ws) { try { this._ws.close(); } catch (_) {} this._ws = null; }
     this.setData({ showSetup: false });
-  }
+    // 保存后自动重连
+    if (!this.data.running) setTimeout(() => this._autoStart(), 300);
+  },
+  cancelSetup() { this.setData({ showSetup: false }); },
+  noop() {},
 });
