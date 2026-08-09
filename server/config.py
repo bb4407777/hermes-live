@@ -37,7 +37,7 @@ class Config:
     # VAD / 分段
     vad_threshold: float = 0.5          # listening 档语音概率阈值
     vad_start_frames: int = 6           # 连续 6 帧（192ms）判入语音段
-    vad_end_silence_ms: int = 600       # 尾静音 600ms 判段结束
+    vad_end_silence_ms: int = 1200      # 尾静音多久判段结束（原 600，中文停顿普遍超 600ms）
     vad_min_utterance_ms: int = 300     # 短于此丢弃（咳嗽/键盘）
     vad_max_utterance_ms: int = 30000   # 强制截断
     vad_preroll_ms: int = 300           # 语音段开头回补
@@ -56,8 +56,11 @@ class Config:
     asr_compute_type: str = "int8"
     asr_language: str = "zh"
     asr_beam_size: int = 1
-    asr_initial_prompt: str = "以下是普通话对话内容。"
-    asr_no_speech_prob_max: float = 0.6
+    asr_initial_prompt: str = (
+        "以下是律师事务所的普通话工作对话，说话人可能提及案件当事人、法院、合同条款等法律词汇，"
+        "也可能谈及日常事务。请准确转写。"
+    )
+    asr_no_speech_prob_max: float = 0.5  # 原 0.6，收紧后静音段更容易被过滤
     asr_avg_logprob_min: float = -1.2
     asr_download_root: str = str(PROJECT_ROOT / "models")
 

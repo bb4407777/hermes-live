@@ -21,8 +21,26 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
-# 静音/极短段时 whisper 家族的常见幻觉（配合 VAD 严分段，命中即丢）
-_HALLUCINATIONS = ("谢谢观看", "请订阅", "字幕由", "感谢观看", "谢谢大家", "明镜与点点")
+# 静音/极短段时 whisper 家族的常见幻觉（子串匹配，命中即丢整段）
+# 最常见：Bilibili/YouTube 字幕训练残留；在低置信度静音段触发
+_HALLUCINATIONS = (
+    "明镜与点点",              # 最高频 Bilibili 幻觉（全句"请不吝点赞 订阅 转发 打赏支持明镜与点点栏目"）
+    "请不吝点赞",              # 上句前段，单独出现时也丢
+    "不吝点赞",
+    "谢谢观看", "感谢观看",
+    "请订阅", "字幕由",
+    "谢谢大家", "谢谢收看",
+    "版权所有", "纯音乐",
+    "请打开字幕",
+)
+
+
+def _is_hallucination(text: str) -> bool:
+    """子串检查：幻觉通常夹在一段较短的转写里，只要命中任意关键词即判定为幻觉。"""
+    for h in _HALLUCINATIONS:
+        if h in text:
+            return True
+    return False
 
 
 class ASR:
@@ -97,9 +115,9 @@ class ASR:
         audio = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
         with self._lock:
             text = self._transcribe_locked(audio)
-        for h in _HALLUCINATIONS:
-            if text.startswith(h) and len(text) <= len(h) + 2:
-                return ""
+        if _is_hallucination(text):
+            logger.debug("幻觉丢弃: %r", text)
+            return ""
         return text
 
     def _transcribe_locked(self, audio: np.ndarray) -> str:
