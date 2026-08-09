@@ -122,6 +122,12 @@ Page({
         const st = msg.state;
         this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: st === 'thinking' || st === 'speaking' });
         if (msg.turn !== undefined) this._player.setTurn(msg.turn);
+        // 半双工：speaking 时停录（防喇叭回声进麦），listening 时恢复
+        if (st === 'speaking') {
+          this._rec && this._rec.pause();
+        } else if (st === 'listening') {
+          this._rec && this._rec.resume();
+        }
         break;
       }
       case 'asr_final': this._addMsg('user', msg.text); break;

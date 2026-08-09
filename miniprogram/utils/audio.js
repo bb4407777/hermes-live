@@ -10,12 +10,12 @@ class Recorder {
     this._buf = new Uint8Array(0);
     this.rm = wx.getRecorderManager();
     this.rm.onFrameRecorded(({ frameBuffer }) => {
-      if (!this.running || !frameBuffer) return;
+      if (!this.running || this._paused || !frameBuffer) return;
       this._push(new Uint8Array(frameBuffer));
     });
     this.rm.onError((e) => console.error('recorder error', e));
-    // 微信录音有 duration 上限，到点自动续（onStop 时若仍 running 则重启）
-    this.rm.onStop(() => { if (this.running) this._start(); });
+    // 微信录音有 duration 上限，到点自动续（onStop 时若 running 且未主动暂停则重启）
+    this.rm.onStop(() => { if (this.running && !this._paused) this._start(); });
   }
 
   // RecorderManager 的 PCM 帧长不固定，本地缓冲重切成 1024B 定长帧
@@ -44,13 +44,29 @@ class Recorder {
     return new Promise((resolve, reject) => {
       wx.authorize({
         scope: 'scope.record',
-        success: () => { this.running = true; this._buf = new Uint8Array(0); this._start(); resolve(); },
+        success: () => { this.running = true; this._paused = false; this._buf = new Uint8Array(0); this._start(); resolve(); },
         fail: () => reject(new Error('未授权麦克风，请在右上角设置里打开'))
       });
     });
   }
 
-  stop() { this.running = false; try { this.rm.stop(); } catch (_) {} }
+  /** 半双工暂停：speaking 时调用，停止采集防喇叭回声进麦 */
+  pause() {
+    if (!this.running || this._paused) return;
+    this._paused = true;
+    this._buf = new Uint8Array(0);  // 清残帧
+    try { this.rm.stop(); } catch (_) {}
+  }
+
+  /** 半双工恢复：listening 时调用，重新开始采集 */
+  resume() {
+    if (!this.running || !this._paused) return;
+    this._paused = false;
+    this._buf = new Uint8Array(0);
+    this._start();
+  }
+
+  stop() { this.running = false; this._paused = false; try { this.rm.stop(); } catch (_) {} }
 }
 
 class Player {
