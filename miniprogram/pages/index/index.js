@@ -40,15 +40,19 @@ Page({
   },
 
   _connect() {
+    const url = this._wsUrl();
     return new Promise((resolve, reject) => {
-      const ws = wx.connectSocket({ url: this._wsUrl() });
+      const ws = wx.connectSocket({ url });
       let opened = false;
       ws.onOpen(() => { opened = true; this._ws = ws; this.setData({ connected: true }); resolve(); });
-      ws.onError(() => { if (!opened) reject(new Error('连不上服务器，检查地址与网络')); });
-      ws.onClose(() => {
+      ws.onError((e) => {
+        if (!opened) reject(new Error('连接失败：' + url + '\n' + (e.errMsg || '')));
+      });
+      ws.onClose(({ code, reason }) => {
         this._ws = null;
         this.setData({ connected: false, running: false, state: 'idle', stateLabel: STATE_LABEL.idle });
         if (this._rec) this._rec.stop();
+        if (opened && code !== 1000) this._addMsg('error', `连接断开(${code})${reason ? '：'+reason : ''}`);
       });
       ws.onMessage(({ data }) => {
         if (typeof data === 'string') this._handleJson(JSON.parse(data));
