@@ -77,17 +77,22 @@ class Player {
     this._sources = [];
     this._nextAt = 0;                     // 下一段的调度时间戳
     this._played = false;                 // 本 turn 是否出过声
+    this._ended = false;                  // 是否已收到服务端 tts_end
     this._doneTimer = null;
   }
 
   setTurn(turn) {
     this.turn = turn;
     this._played = false;
+    this._ended = false;                  // 收到服务端 tts_end 才置真
     this._nextAt = 0;
     for (const s of this._sources) { try { s.stop(); } catch (_) {} }
     this._sources = [];
     if (this._doneTimer) { clearTimeout(this._doneTimer); this._doneTimer = null; }
   }
+
+  // 服务端告知本 turn 音频已全部发完：之后缓冲排空才报 playback_done
+  endTurn() { this._ended = true; }
 
   // pcmBuf: ArrayBuffer，PCM16LE 24k mono
   play(turn, pcmBuf) {
@@ -102,20 +107,26 @@ class Player {
     src.buffer = buf;
     src.connect(this.ctx.destination);
     const now = this.ctx.currentTime;
-    const at = Math.max(now + 0.02, this._nextAt);   // 首段留 20ms 起播余量，后续无缝衔接
+    // 欠载（首帧或网络断流后迟到帧）：重锚留 120ms 余量填 jitter，防缝隙卡顿；
+    // 流健康时严格接 _nextAt 无缝连播。
+    const at = Math.max(now + (this._nextAt < now ? 0.12 : 0.02), this._nextAt);
     src.start(at);
     this._nextAt = at + buf.duration;
     this._played = true;
     this._sources.push(src);
     if (this._sources.length > 64) this._sources.splice(0, 32); // 已播完的引用不必全留
 
-    // 欠载检测：最后一段播完后 ~800ms 无新帧 → 本 turn 播放结束
-    // 微信 WebAudioContext 输出缓冲比浏览器厚，350ms 会导致 playback_done 提前触发
+    // 播完判定：缓冲排空 + 已收到 tts_end（音频全部发完）才报 playback_done。
+    // 只靠欠载猜测会在句间断流 >800ms 时误判播完（串音/提前开麦的根因）。
     if (this._doneTimer) clearTimeout(this._doneTimer);
     const capturedTurn = this.turn;
-    this._doneTimer = setTimeout(() => {
-      if (this.turn === capturedTurn && this._played) this.onDone(capturedTurn);
-    }, Math.max(0, (this._nextAt - this.ctx.currentTime) * 1000) + 800);
+    const check = () => {
+      if (this.turn !== capturedTurn || !this._played) return;
+      if (!this._ended) { this._doneTimer = setTimeout(check, 300); return; }  // 断流中，等后续帧
+      this.onDone(capturedTurn);
+    };
+    this._doneTimer = setTimeout(check,
+      Math.max(0, (this._nextAt - this.ctx.currentTime) * 1000) + 300);
   }
 
   close() { try { this.ctx.close(); } catch (_) {} }

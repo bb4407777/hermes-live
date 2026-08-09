@@ -51,6 +51,8 @@ class Session:
         self.barge_cooldown_until = 0.0
         self.playback_done: dict[int, asyncio.Event] = {}
         self._last_partial: str = ""   # 流式 ASR 上一帧的中间文本（防重复发送）
+        self.ptt = False               # 按住说话模式：listening 态不跑 VAD，等 utterance_end 收口
+        self._ptt_buf: list[bytes] = []  # PTT 期间攒的帧（batch ASR 兜底用）
         self.closed = False
 
     # ---------- 出站 ----------
@@ -81,6 +83,10 @@ class Session:
                 if partial and partial != self._last_partial:
                     self._last_partial = partial
                     self.send_json("asr_partial", text=partial)
+            if self.ptt:
+                # PTT：不跑 VAD 分段，攒帧等 utterance_end 显式收口
+                self._ptt_buf.append(pcm)
+                return
             ev = self.segmenter.feed(pcm)
             if ev and ev[0] == "end" and ev[1]:
                 self._begin_turn(pcm_utt=ev[1].pcm)
@@ -95,8 +101,16 @@ class Session:
     async def on_control(self, obj: dict) -> None:
         t = obj.get("type")
         if t == "start":
+            self.ptt = bool(obj.get("ptt"))
             if self.state == "idle":
                 self._enter_listening()
+        elif t == "utterance_end":
+            # PTT 松手：攒的帧整段开 turn（太短当作误触丢弃）
+            if self.state == "listening":
+                pcm = b"".join(self._ptt_buf)
+                self._ptt_buf = []
+                if len(pcm) >= FRAME_BYTES * 10:  # ≥320ms
+                    self._begin_turn(pcm_utt=pcm)
         elif t == "stop":
             await self._cancel_turn()
             self.segmenter.reset()
@@ -138,6 +152,7 @@ class Session:
     def _enter_listening(self, echo_guard: bool = False) -> None:
         self.segmenter.reset()
         self._last_partial = ""
+        self._ptt_buf = []
         if self.asr_stream is not None:
             self.asr_stream.reset()
         if echo_guard:
@@ -303,8 +318,11 @@ class Session:
                     self.send_audio(t, pcm)
                 await inflight  # 让合成异常浮出来
                 inflight = None
-            # 音频全部发出（客户端缓冲播放中）：等 playback_done，超时按时长估算兜底
+            # 音频全部发出（客户端缓冲播放中）：显式告知"本 turn 音频已发完"，
+            # 客户端只在收到 tts_end 且缓冲排空后才报 playback_done（不再靠欠载猜测，
+            # 句间断流 >800ms 不再被误判为播完）。
             if first_send is not None:
+                self.send_json("tts_end", turn=t)
                 dur = pcm_sent / 2 / self.cfg.out_rate
                 remain = max(0.5, dur - (time.monotonic() - first_send) + 0.4)
                 with contextlib.suppress(asyncio.TimeoutError):

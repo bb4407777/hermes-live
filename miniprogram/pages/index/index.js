@@ -22,6 +22,7 @@ Page({
     state: 'idle', stateLabel: '待机',
     canInterrupt: false,
     partialText: '',
+    holding: false,
     messages: [],
     textIn: '',
     scrollInto: '',
@@ -61,8 +62,7 @@ Page({
     this._connecting = true;
     try {
       if (!this._ws || !this.data.connected) await this._connect();
-      await this._rec.start();
-      this._sendJson({ type: 'start' });
+      this._sendJson({ type: 'start', ptt: true });   // PTT 模式：不自动开麦，等按住
       this.setData({ running: true });
     } catch (e) {
       // 静默失败——用户可手动点「开始对话」
@@ -73,7 +73,7 @@ Page({
 
   _initRec() {
     this._rec = new Recorder((frame) => {
-      if (!this._ws) return;
+      if (!this._ws || !this.data.holding) return;   // PTT：只在按住时上行
       const out = new Uint8Array(1 + frame.byteLength);
       out[0] = 0x01; out.set(new Uint8Array(frame), 1);
       this._ws.send({ data: out.buffer });
@@ -96,7 +96,7 @@ Page({
       ws.onError((e) => { if (!opened) reject(new Error(e.errMsg || url)); });
       ws.onClose(({ code, reason }) => {
         this._ws = null;
-        this.setData({ connected: false, running: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
+        this.setData({ connected: false, running: false, holding: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
         if (this._rec) this._rec.stop();
         if (opened && code !== 1000) this._addMsg('error', `连接断开(${code})${reason ? '：' + reason : ''}`);
       });
@@ -127,15 +127,18 @@ Page({
         if (st !== 'listening') this.setData({ partialText: '' });
         if (st === 'speaking') {
           this._rec && this._rec.pause();
-        } else if (st === 'listening') {
-          // 延迟 500ms 再开录：等喇叭输出缓冲彻底排空，防末尾音频录进麦克风
-          // （微信 WebAudio 输出延迟比浏览器大，立刻开录必然回声）
+        } else if (st === 'listening' && this.data.holding) {
+          // PTT 按住中等开录（含打断后回到 listening 的场景）：
+          // 延迟 500ms 等喇叭输出缓冲排空，防末尾音频录进麦克风
           setTimeout(() => {
-            if (this.data.state === 'listening' && this._rec) this._rec.resume();
+            if (this.data.state === 'listening' && this.data.holding && this._rec) this._startRec();
           }, 500);
         }
         break;
       }
+      case 'tts_end':
+        this._player.endTurn();
+        break;
       case 'asr_partial':
         this.setData({ partialText: msg.text });
         break;
@@ -176,18 +179,52 @@ Page({
     this._connecting = true;
     try {
       if (!this._ws || !this.data.connected) await this._connect();
-      await this._rec.start();
-      this._sendJson({ type: 'start' });
+      this._sendJson({ type: 'start', ptt: true });
       this.setData({ running: true });
     } catch (e) {
       this._addMsg('error', '启动失败：' + (e.message || e));
     } finally { this._connecting = false; }
   },
 
+  // ---------- 按住说话（PTT） ----------
+  async pttDown() {
+    if (this.data.holding) return;
+    this.setData({ holding: true });
+    try {
+      if (!this._ws || !this.data.connected) await this._connect();
+      if (!this.data.running) {
+        this._sendJson({ type: 'start', ptt: true });
+        this.setData({ running: true });
+      }
+      const st = this.data.state;
+      if (st === 'thinking' || st === 'speaking') {
+        // 按住即打断：等服务回到 listening 后由 state 处理里恢复采集
+        this._sendJson({ type: 'interrupt' });
+        return;
+      }
+      await this._startRec();
+    } catch (e) {
+      this.setData({ holding: false });
+      this._addMsg('error', '开麦失败：' + (e.message || e));
+    }
+  },
+
+  async _startRec() {
+    if (!this._rec.running) await this._rec.start();
+    else this._rec.resume();
+  },
+
+  pttUp() {
+    if (!this.data.holding) return;
+    this.setData({ holding: false });
+    if (this._rec) this._rec.pause();
+    if (this.data.state === 'listening') this._sendJson({ type: 'utterance_end' });
+  },
+
   _stopAll() {
     this._sendJson({ type: 'stop' });
     if (this._rec) this._rec.stop();
-    this.setData({ running: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
+    this.setData({ running: false, holding: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
   },
 
   interrupt() { this._sendJson({ type: 'interrupt' }); },
