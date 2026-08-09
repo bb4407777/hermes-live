@@ -18,7 +18,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from .asr import ASR
+from .asr import ASR, SherpaStreamingASR
 from .config import PROJECT_ROOT, load_config
 from .hermes_client import HermesClient
 from .protocol import unpack_audio_up
@@ -98,7 +98,8 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({
         "ok": True,
         "hermes": await hermes.health(),
-        "asr_model": request.app["cfg"].asr_model,
+        "asr_model": ("sherpa-paraformer" if request.app.get("asr_stream") and request.app["asr_stream"].available
+                      else request.app["cfg"].asr_model),
         "voice": request.app["cfg"].tts_voice,
         "session_id": hermes.session_id,
     })
@@ -123,7 +124,8 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     await ws.prepare(request)
     app = request.app
     outbox: asyncio.Queue = asyncio.Queue()
-    session = Session(app["cfg"], app["asr"], app["tts"], app["hermes"], outbox)
+    session = Session(app["cfg"], app["asr"], app["tts"], app["hermes"], outbox,
+                      asr_stream=app.get("asr_stream"))
     writer = asyncio.create_task(ws_writer(ws, outbox))
     session.send_json("hello", session_id=app["hermes"].session_id,
                       voice=app["cfg"].tts_voice, asr_model=app["cfg"].asr_model)
@@ -157,14 +159,20 @@ def build_app(cfg, preload: bool = True) -> web.Application:
     app = web.Application()
     app["cfg"] = cfg
     app["asr"] = ASR(cfg)
+    app["asr_stream"] = SherpaStreamingASR(cfg)  # 流式首选；load() 失败时静默回退 ASR
     app["tts"] = TTSEngine(cfg)
 
     async def on_startup(app: web.Application) -> None:
         app["http"] = aiohttp.ClientSession()
         app["hermes"] = HermesClient(cfg, app["http"])
         if preload:
-            logger.info("preloading ASR model ...")
-            await asyncio.to_thread(app["asr"].load)
+            # 优先加载流式 ASR（快，0.7s）；失败则回退加载批量 ASR（慢，~6s）
+            if app["asr_stream"].load():
+                logger.info("streaming ASR (sherpa-onnx) ready")
+            else:
+                logger.info("sherpa-onnx 不可用，加载批量 ASR ...")
+                app["asr_stream"] = None
+                await asyncio.to_thread(app["asr"].load)
         if await app["hermes"].health():
             logger.info("hermes gateway ok @ %s", cfg.hermes_base_url)
         else:

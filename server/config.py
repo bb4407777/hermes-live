@@ -49,7 +49,10 @@ class Config:
     barge_preroll_ms: int = 500
 
     # ASR
-    asr_backend: str = "auto"           # auto | whispercpp | faster
+    asr_backend: str = "auto"           # auto | sherpa | whispercpp | faster
+    # sherpa-onnx 流式 paraformer（优先；模型与 expression-trainer 共用，无需另行下载）
+    asr_sherpa_model_dir: str = "/Users/gao/clone/expression-trainer/models/sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    asr_sherpa_threads: int = 4
     asr_ggml_model: str = "models/ggml/ggml-large-v3-turbo-q5_0.bin"
     asr_threads: int = 6
     asr_model: str = "large-v3-turbo"   # faster-whisper 档位，可降 "small" 省内存

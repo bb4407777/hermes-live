@@ -17,7 +17,7 @@ import logging
 import time
 
 from . import protocol
-from .asr import ASR
+from .asr import ASR, SherpaStreamingASR
 from .config import Config
 from .hermes_client import HermesClient
 from .metrics import TurnMetrics
@@ -33,9 +33,11 @@ ECHO_GUARD_S = 0.3  # speaking→listening 后的余声忽略窗
 
 class Session:
     def __init__(self, cfg: Config, asr: ASR, tts: TTSEngine, hermes: HermesClient,
-                 outbox: asyncio.Queue):
+                 outbox: asyncio.Queue,
+                 asr_stream: SherpaStreamingASR | None = None):
         self.cfg = cfg
         self.asr = asr
+        self.asr_stream = asr_stream   # 流式后端（sherpa）；None 时回退 batch ASR
         self.tts = tts
         self.hermes = hermes
         self.outbox = outbox  # ("json", str) | ("bin", bytes)，由 ws 写协程串行发送
@@ -72,6 +74,9 @@ class Session:
         if self.state == "listening":
             if time.monotonic() < self.listen_ignore_until:
                 return
+            # 流式 ASR：逐帧喂，VAD 触发后结果即时可取（RTF≈0.05，同步不阻塞）
+            if self.asr_stream is not None:
+                self.asr_stream.feed(pcm)
             ev = self.segmenter.feed(pcm)
             if ev and ev[0] == "end" and ev[1]:
                 self._begin_turn(pcm_utt=ev[1].pcm)
@@ -128,6 +133,8 @@ class Session:
 
     def _enter_listening(self, echo_guard: bool = False) -> None:
         self.segmenter.reset()
+        if self.asr_stream is not None:
+            self.asr_stream.reset()
         if echo_guard:
             self.listen_ignore_until = time.monotonic() + ECHO_GUARD_S
         self._set_state("listening")
@@ -167,7 +174,13 @@ class Session:
         tts_task = asyncio.create_task(self._tts_consumer(t, queue, m))
         try:
             if text is None:
-                text = await asyncio.to_thread(self.asr.transcribe, pcm_utt)
+                if self.asr_stream is not None:
+                    # 流式路径：VAD 触发时累积结果已就位，get_result() ≈ 0 延迟
+                    text = self.asr_stream.get_result()
+                    self.asr_stream.reset()
+                else:
+                    # 批量兜底：约 1s 转写延迟
+                    text = await asyncio.to_thread(self.asr.transcribe, pcm_utt)
                 m.mark("asr_done")
                 m.asr_text = text
                 if not text:
