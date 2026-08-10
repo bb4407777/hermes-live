@@ -7,7 +7,8 @@
 - **doubao ASR 空结果**：实测 session 每次立即结束（result=''），暂弃用，配置切回 faster-whisper
 
 ### Changed
-- **ASR 切回原始 large-v3**：`asr_backend: faster` + 本地权重目录 `models/faster-whisper-large-v3`（ModelScope 下载，规避 HF xet CDN 直连超时）
+- **ASR 切回原始 large-v3，最终落 whisper.cpp Metal**：`asr_backend: whispercpp` + `models/ggml/ggml-large-v3-q5_0.bin`（ModelScope `timeless/whispercpp` 下载，HF xet CDN 本机直连超时）；实测 RTF 0.47（faster-whisper CPU int8 为 1.37，约 3 倍提速）
+- faster-whisper large-v3 权重（`models/faster-whisper-large-v3`，ModelScope `keepitsimple/faster-whisper-large-v3`）保留作兜底
 
 ## [0.4.4] - 2026-08-10
 
