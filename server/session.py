@@ -100,13 +100,7 @@ class Session:
                 if self.doubao_asr is not None:
                     self.doubao_asr.feed(b"\x00" * FRAME_BYTES)  # 补一帧静音促 flush
                 self._begin_turn(pcm_utt=ev[1].pcm)
-        elif self.state == "speaking":
-            if time.monotonic() < self.barge_cooldown_until:
-                return
-            pre = self.barge.feed(pcm)
-            if pre is not None:
-                await self._barge_in(pre)
-        # thinking / idle：丢弃
+        # speaking / thinking / idle：丢弃（speaking 态停麦在客户端完成，服务端不做 barge-in）
 
     async def on_control(self, obj: dict) -> None:
         t = obj.get("type")
@@ -232,14 +226,15 @@ class Session:
 
             assembler = SentenceAssembler(self.cfg.sentence_max_buffer,
                                           self.cfg.sentence_first_min)
+            # 先等 Hermes SSE 完整返回，再统一送 TTS
+            # 避免边生成边合成导致句间缓冲空洞（卡壳）
+            all_sentences: list[str] = []
             finish_reason = None
             async for ev in self.hermes.chat_stream(text):
                 if ev.kind == "delta":
                     m.mark("first_delta")
                     self.send_json("agent_delta", turn=t, text=ev.text)
-                    for s in assembler.feed(ev.text):
-                        m.mark("first_sentence")
-                        queue.put_nowait(s)
+                    all_sentences.extend(assembler.feed(ev.text))
                 elif ev.kind == "tool":
                     if self.cfg.show_tool_progress:
                         tool = ev.tool or {}
@@ -249,10 +244,13 @@ class Session:
                 elif ev.kind == "done":
                     finish_reason = ev.finish_reason
             for s in assembler.flush():
+                all_sentences.append(s)
+            self.send_json("agent_done", turn=t, finish_reason=finish_reason)
+            # SSE 全部到齐，一次性入队给 TTS
+            for s in all_sentences:
                 m.mark("first_sentence")
                 queue.put_nowait(s)
             queue.put_nowait(None)  # 收口哨兵
-            self.send_json("agent_done", turn=t, finish_reason=finish_reason)
             await tts_task  # 等音频发完 + 客户端播完
             m.mark("done")
             m.log()

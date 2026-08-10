@@ -121,7 +121,7 @@ Page({
         break;
       case 'state': {
         const st = msg.state;
-        this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: st === 'thinking' || st === 'speaking' });
+        this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: false });
         if (msg.turn !== undefined) this._player.setTurn(msg.turn);
         // 半双工：speaking 时停录（防喇叭回声进麦），listening 时恢复
         if (st !== 'listening') this.setData({ partialText: '' });
