@@ -101,6 +101,7 @@ class DoubaoStreamingASR:
         self._pcm_queue = asyncio.Queue()
         self._result_future = loop.create_future()
         self._partial = ""
+        logger.info("doubao start_turn: launching background session task")
         self._task = loop.create_task(self._run_session())
 
     async def _run_session(self) -> None:
@@ -108,28 +109,35 @@ class DoubaoStreamingASR:
         from doubaoime_asr.asr import ResponseType
         from doubaoime_asr import transcribe_realtime
 
+        logger.info("doubao session starting...")
+
         async def pcm_gen():
             while True:
                 chunk = await self._pcm_queue.get()
                 if chunk is None:
+                    logger.debug("doubao pcm_gen: got None, ending stream")
                     return
                 yield chunk
 
         final_text = ""
         try:
+            logger.info("doubao transcribe_realtime() starting...")
             async for resp in transcribe_realtime(pcm_gen(), config=self._config):
                 if resp.type.name == "INTERIM_RESULT":
                     self._partial = resp.text
+                    logger.debug("doubao interim: %r", resp.text[:50])
                 elif resp.type.name == "FINAL_RESULT":
                     final_text = resp.text
+                    logger.info("doubao final: %r", final_text[:80])
                 elif resp.type.name == "ERROR":
                     logger.warning("doubao ASR 错误：%s", resp.error_msg)
                     break
         except Exception as e:
-            logger.warning("doubao ASR 会话异常：%s", e)
+            logger.warning("doubao ASR 会话异常：%s", e, exc_info=True)
         finally:
             if self._result_future and not self._result_future.done():
                 self._result_future.set_result(final_text)
+            logger.info("doubao session ended, result=%r", final_text[:80] if final_text else "")
 
     def feed(self, pcm16: bytes) -> str:
         """喂一帧 PCM16（1024 字节）。返回当前中间文本（可能为空）。"""
