@@ -17,7 +17,7 @@ import logging
 import time
 
 from . import protocol
-from .asr import ASR, SherpaStreamingASR
+from .asr import ASR, SherpaStreamingASR, DoubaoStreamingASR
 from .config import Config
 from .hermes_client import HermesClient
 from .metrics import TurnMetrics
@@ -34,10 +34,12 @@ ECHO_GUARD_S = 0.3  # speaking→listening 后的余声忽略窗
 class Session:
     def __init__(self, cfg: Config, asr: ASR, tts: TTSEngine, hermes: HermesClient,
                  outbox: asyncio.Queue,
-                 asr_stream: SherpaStreamingASR | None = None):
+                 asr_stream: SherpaStreamingASR | None = None,
+                 doubao_asr: DoubaoStreamingASR | None = None):
         self.cfg = cfg
         self.asr = asr
         self.asr_stream = asr_stream   # 流式后端（sherpa）；None 时回退 batch ASR
+        self.doubao_asr = doubao_asr   # 豆包云端流式；优先级最高
         self.tts = tts
         self.hermes = hermes
         self.outbox = outbox  # ("json", str) | ("bin", bytes)，由 ws 写协程串行发送
@@ -78,7 +80,12 @@ class Session:
             if time.monotonic() < self.listen_ignore_until:
                 return
             # 流式 ASR：逐帧喂，中间结果推给前端实时显示
-            if self.asr_stream is not None:
+            if self.doubao_asr is not None:
+                partial = self.doubao_asr.feed(pcm)
+                if partial and partial != self._last_partial:
+                    self._last_partial = partial
+                    self.send_json("asr_partial", text=partial)
+            elif self.asr_stream is not None:
                 partial = self.asr_stream.feed(pcm)
                 if partial and partial != self._last_partial:
                     self._last_partial = partial
@@ -89,6 +96,9 @@ class Session:
                 return
             ev = self.segmenter.feed(pcm)
             if ev and ev[0] == "end" and ev[1]:
+                # doubao：VAD end 时已有足量帧，finish() 在 _run_turn 里等最终结果
+                if self.doubao_asr is not None:
+                    self.doubao_asr.feed(b"\x00" * FRAME_BYTES)  # 补一帧静音促 flush
                 self._begin_turn(pcm_utt=ev[1].pcm)
         elif self.state == "speaking":
             if time.monotonic() < self.barge_cooldown_until:
@@ -153,6 +163,8 @@ class Session:
         self.segmenter.reset()
         self._last_partial = ""
         self._ptt_buf = []
+        if self.doubao_asr is not None:
+            self.doubao_asr.reset()
         if self.asr_stream is not None:
             self.asr_stream.reset()
         if echo_guard:
@@ -194,8 +206,12 @@ class Session:
         tts_task = asyncio.create_task(self._tts_consumer(t, queue, m))
         try:
             if text is None:
-                if self.asr_stream is not None:
-                    # 流式路径：VAD 触发时累积结果已就位，get_result() ≈ 0 延迟
+                if self.doubao_asr is not None:
+                    # 豆包云端流式路径：finish() 等待最终结果
+                    text = await self.doubao_asr.finish()
+                    self.doubao_asr.reset()
+                elif self.asr_stream is not None:
+                    # sherpa 流式路径：VAD 触发时累积结果已就位，get_result() ≈ 0 延迟
                     text = self.asr_stream.get_result()
                     self.asr_stream.reset()
                 else:
