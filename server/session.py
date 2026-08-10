@@ -165,6 +165,7 @@ class Session:
         self._ptt_buf = []
         if self.doubao_asr is not None:
             self.doubao_asr.reset()
+            self.doubao_asr.start_turn()   # 提前建连，VAD 触发前就准备好 WS 会话
         if self.asr_stream is not None:
             self.asr_stream.reset()
         if echo_guard:
