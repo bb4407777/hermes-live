@@ -11,7 +11,7 @@
       <view class="icon-btn" bindtap="openSetup">⚙</view>
     </view>
 
-    <!-- 第二行：音色 + 语速 + 打断 -->
+    <!-- 第二行：音色 + 语速 -->
     <view class="controls">
       <picker class="picker-wrap" mode="selector" range="{{voiceLabels}}" value="{{voiceIdx}}" bindchange="onVoiceChange">
         <view class="picker-btn">{{voiceLabels[voiceIdx]}} ▾</view>
@@ -19,8 +19,6 @@
       <picker class="picker-wrap" mode="selector" range="{{rateLabels}}" value="{{rateIdx}}" bindchange="onRateChange">
         <view class="picker-btn">{{rateLabels[rateIdx]}} ▾</view>
       </picker>
-      <view class="spacer"></view>
-      <view class="ctrl-btn {{canInterrupt ? '' : 'dim'}}" bindtap="interrupt">打断</view>
     </view>
 
     <!-- 语音球 + 状态标签 -->
