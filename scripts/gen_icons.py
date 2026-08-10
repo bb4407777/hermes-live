@@ -6,6 +6,7 @@ Outputs:
   assets/icon-ios-1024.png          1024x1024 RGB (no alpha; iOS App Store rule)
   assets/AppIcon.iconset/icon_*.png 10 macOS iconset sizes (RGBA)
   ios/Assets.xcassets/AppIcon.appiconset/icon-1024.png  1024x1024 RGB
+  web/favicon.png                   64x64 RGBA (browser favicon, served at /web/favicon.png)
 
 Usage: .venv/bin/python scripts/gen_icons.py <source.png>
 """
@@ -69,6 +70,11 @@ def main() -> None:
         out = ROOT / "assets/AppIcon.iconset" / name
         master.resize((size, size), Image.LANCZOS).save(out, "PNG", optimize=True)
         print(f"  -> {out.relative_to(ROOT)}")
+
+    # web favicon (RGBA, 64x64)
+    out = ROOT / "web/favicon.png"
+    master.resize((64, 64), Image.LANCZOS).save(out, "PNG", optimize=True)
+    print(f"  -> {out.relative_to(ROOT)}")
 
     print("done.")
 
