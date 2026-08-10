@@ -2,8 +2,15 @@
 page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box; }
 .page { display: flex; flex-direction: column; height: 100vh; }
 
+/* 固定头部：topbar + controls + 语音球 */
+.header-fixed {
+  flex-shrink: 0;
+  background: #0d1117;
+  border-bottom: 1rpx solid #21262d;
+}
+
 /* 顶栏 */
-.topbar { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 28rpx 12rpx; border-bottom: 1rpx solid #21262d; }
+.topbar { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 28rpx 12rpx; }
 .title  { font-size: 30rpx; font-weight: 600; }
 .status { font-size: 24rpx; color: #8b949e; }
 .dot    { width: 14rpx; height: 14rpx; border-radius: 50%; background: #30363d; }
@@ -12,7 +19,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .icon-btn { font-size: 36rpx; color: #8b949e; padding: 4rpx 12rpx; }
 
 /* 控件行：音色 / 语速 / 打断 */
-.controls { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 24rpx; border-bottom: 1rpx solid #21262d; }
+.controls { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 24rpx; border-top: 1rpx solid #21262d; }
 .picker-wrap { display: inline-block; }
 .picker-btn  { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; border-radius: 10rpx;
                padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; }
@@ -21,7 +28,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .ctrl-btn.dim { color: #444d56; border-color: #21262d; }
 
 /* 语音球 */
-.orb-area  { display: flex; flex-direction: column; align-items: center; padding: 32rpx 0 20rpx; }
+.orb-area  { display: flex; flex-direction: column; align-items: center; padding: 24rpx 0 18rpx; border-top: 1rpx solid #21262d; }
 .orb-wrap  { width: 160rpx; height: 160rpx; display: flex; align-items: center; justify-content: center; }
 .orb {
   width: 140rpx; height: 140rpx; border-radius: 50%;
@@ -33,8 +40,6 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .orb.speaking  { filter: hue-rotate(-25deg); animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
 @keyframes breathe { 50% { transform: scale(1.08); } }
 .orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
-.partial-text { font-size: 26rpx; color: #e6edf3; opacity: .65; font-style: italic;
-                margin-top: 14rpx; padding: 0 40rpx; text-align: center; max-width: 100%; }
 
 /* 对话记录 */
 .transcript { flex: 1; padding: 16rpx 24rpx; box-sizing: border-box; }
@@ -44,6 +49,8 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .bubble.agent { background: #161b22; border: 1rpx solid #21262d; margin-right: auto; }
 .bubble.tool  { color: #8b949e; font-size: 24rpx; background: none; padding: 0 8rpx; }
 .bubble.error { color: #f85149; font-size: 24rpx; background: none; margin: 10rpx auto; }
+/* 实时转写气泡：跟用户气泡同侧，半透明斜体表示"正在说" */
+.bubble.partial { opacity: .55; font-style: italic; }
 .pad { height: 16rpx; }
 
 /* 文字输入 */
