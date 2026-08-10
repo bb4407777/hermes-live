@@ -45,12 +45,22 @@ def _sanitize_name(raw: str) -> str:
 
 
 def _check_token(request: web.Request) -> None:
-    """回环免 token（壳/本机浏览器打开的页面不带 token）；外部地址必须带对。"""
-    if request.remote in ("127.0.0.1", "::1"):
+    """本机回环免 token；其余来源（LAN、Cloudflare Tunnel）必须带对。
+
+    隧道流量由本机 cloudflared 经回环转发，单看 remote 会被回环豁免放行——
+    用 Cloudflare edge 注入的 Cf-Ray 头识别隧道流量，对其强制 token。
+    token 接受两种携带方式：?token= 查询参数（/ws）或 Authorization: Bearer（API）。
+    """
+    via_tunnel = "cf-ray" in request.headers
+    if request.remote in ("127.0.0.1", "::1") and not via_tunnel:
         return
     cfg = request.app["cfg"]
-    if cfg.auth_token and request.query.get("token") != cfg.auth_token:
-        raise web.HTTPUnauthorized(text="bad token")
+    if not cfg.auth_token:
+        return
+    if (request.query.get("token") == cfg.auth_token
+            or request.headers.get("Authorization") == f"Bearer {cfg.auth_token}"):
+        return
+    raise web.HTTPUnauthorized(text="bad token")
 
 
 async def handle_upload(request: web.Request) -> web.Response:
