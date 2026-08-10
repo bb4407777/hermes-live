@@ -3,28 +3,55 @@
 用语音和本机 Hermes gateway 实时对话（参照 gpt-live 的形态，语音层全免费自建）。
 
 ```
-浏览器开麦 ──ws://127.0.0.1:8698──> hermes-live 服务
-   │ AudioWorklet 采集 16k PCM16          │ silero VAD 分段
-   │ AudioWorklet 播放 24k（turn 过滤）    │ faster-whisper 本地转写（中文）
-   └── 全双工，播音时高门槛 VAD 打断        │ Hermes 8647 /v1/chat/completions（SSE 流式）
-                                          │ 中文分句 → edge-tts 逐句合成（免费微软音色）
-                                          └→ 音频帧流回浏览器
+浏览器/小程序 ──ws://127.0.0.1:8698──> hermes-live 服务
+   │ AudioWorklet/RecorderManager 16k PCM16  │ silero VAD 分段
+   │ AudioWorklet/InnerAudioContext 24k       │ 豆包云端 ASR（实时流式，优先）
+   │   （turn 字节打断过滤）                     │ sherpa-onnx paraformer（本地备胎，RTF 0.03）
+   └── 全双工，播音时高门槛 VAD 打断             │ Hermes 8647 /v1/chat/completions（SSE 流式）
+                                             │ 中文分句 → edge-tts 逐句合成（免费微软音色）
+                                             └→ 音频帧流回客户端
 ```
 
+**当前版本：0.4.4**（2026-08-10）
+- 小程序支持：微信小程序全功能支持，可手机端远程重启服务
+- ASR 三档：豆包云端（优先）→ sherpa-onnx 流式（本地）→ whisper.cpp turbo（兜底）
+- 全双工对话：实时字幕、AI 说话时可随时打断
+
 ## 启动
+
+### 服务端
 
 ```bash
 cd ~/Code/hermes-live
 .venv/bin/python -m server.main          # → http://127.0.0.1:8698（首次会下载 whisper 权重）
 ```
 
+### 客户端
+
+**1. 网页版（推荐本机使用）**
+
 浏览器（Safari/Chrome 均可）打开 `http://127.0.0.1:8698`，点「开始对话」授权麦克风即聊。
 按需启动、用完 Ctrl+C 停，不做常驻（16GB 内存让步）。
 
+**2. 微信小程序（推荐手机使用）**
+
+- 扫码进入「哈尔密斯语音对话」小程序（appid: `wxa5b11d3d8b80b07b`）
+- 首次使用：点右上角「⚙️」设置服务器地址和 token
+  - 服务器地址：`ws://你的IP:8698`（需 Mac 侧 `config.yaml` 改 `host: 0.0.0.0`）
+  - Token：`config.yaml` 里设的 `auth_token`（必须设置，安全要求）
+- 功能：实时字幕、音色/语速选择、新会话、**远程重启服务**
+- 上传脚本：`node scripts/wx-upload.js [版本号] [描述]`
+
+**3. iOS 原生 App**
+
+参见 `ios/README-ios.md`，免费个人签真 app，工程已生成好，装 Xcode 后双击 `ios/HermesLive.xcodeproj` 即可跑。
+
+**4. Tailscale 远程访问**
+
+见 `docs/mobile.md`（网页零开发方案）。
+
 ~~菜单栏版~~（2026-08-09 已弃用删除）：WKWebView 壳缓存页面不及时，直接用网页版即可。
-手机上用两条路：`docs/mobile.md`（Tailscale + 网页零开发）或 `ios/README-ios.md`（免费个人签真 app，
-工程已生成好，装 Xcode 后双击 `ios/HermesLive.xcodeproj` 即可跑；Mac 侧需 config.yaml 配
-`host: 0.0.0.0` + `auth_token`）。给网关提速的配置已落待重启：`docs/hermes-toolset-proposal.md`。
+给网关提速的配置已落待重启：`docs/hermes-toolset-proposal.md`。
 
 - 配置：`cp config.yaml.example config.yaml` 后改（音色/ASR 档位/VAD 阈值等，全部键见 `server/config.py`）。
 - 终端模式（无浏览器）：`.venv/bin/python -m cli.m0_pipeline --mic`（半双工；终端 App 需麦克风权限）。
@@ -59,12 +86,22 @@ scripts/smoke.sh                          # 冒烟：健康检查 + edge-tts + �
 ## 依赖与备胎
 
 全部 py3.13 + Apple Silicon 预编译轮子（见 `requirements.txt`），明确不装 torch/mlx。
-ASR 双后端（`server/asr.py`，`asr_backend` 可切）：**默认 pywhispercpp（whisper.cpp turbo q5_0，Metal GPU）**，
-faster-whisper（CPU int8）兜底。edge-tts 若被风控：`server/tts.py` 是唯一接口点，备胎 `say -v Tingting`（离线）或 Piper。
+
+**ASR 三档（`server/asr.py`，`asr_backend` 可切）：**
+1. **doubaoime-asr**（默认优先）：豆包输入法逆向云端 ASR，实时流式，准确度高
+   - 需联网，凭据：`~/.config/doubao-asr/credentials.json`（用 doubaoime-asr 包登录生成）
+2. **sherpa-onnx**（本地备胎）：流式 paraformer，RTF 0.03，边说边出字
+   - 模型与 expression-trainer 共用：`/Users/gao/clone/expression-trainer/models/sherpa-onnx-streaming-paraformer-bilingual-zh-en`
+3. **pywhispercpp**（最终兜底）：whisper.cpp turbo q5_0，Metal GPU，RTF 0.35
+   - 模型：`models/ggml/ggml-large-v3-turbo-q5_0.bin`（547MB，首次启动自动下载）
+
+**TTS：**
+- 主力：edge-tts（免费微软音色，单句合成快于实时）
+- 备胎：`say -v Tingting`（离线）或 Piper
+- 接口：`server/tts.py` 是唯一接口点
 
 安装注意（本机网络实测）：pip 走 `-i https://mirrors.aliyun.com/pypi/simple/`（直连 PyPI 极慢、清华 403）；
 HF 权重走 hf-mirror 且必须 `HF_HUB_DISABLE_XET=1`（Xet CAS 绕过镜像会 401，asr.py 已内置这两个默认值）。
-权重位置：`models/ggml/ggml-large-v3-turbo-q5_0.bin`（547MB，主力）+ `models/` 下 faster-whisper turbo（1.5GB，兜底，可删）。
 
 ## 实测记录（M1 Pro 16GB，2026-08-08 验收）
 
