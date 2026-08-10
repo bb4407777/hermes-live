@@ -192,7 +192,7 @@ def build_app(cfg, preload: bool = True) -> web.Application:
             if cfg.asr_backend in ("auto", "doubao") and app["doubao_asr"].load():
                 logger.info("ASR: doubaoime（豆包云端流式）ready")
                 app["asr_stream"] = None  # doubao 优先，sherpa 不再加载
-            elif cfg.asr_backend != "doubao" and app["asr_stream"].load():
+            elif cfg.asr_backend in ("auto", "sherpa") and app["asr_stream"].load():
                 logger.info("ASR: streaming sherpa-onnx ready")
                 app["doubao_asr"] = None
             else:
