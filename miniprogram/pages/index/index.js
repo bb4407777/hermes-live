@@ -213,6 +213,44 @@ Page({
   onVoiceChange(e) { this.setData({ voiceIdx: +e.detail.value }); this.pushConfig(); },
   onRateChange(e)  { this.setData({ rateIdx:  +e.detail.value }); this.pushConfig(); },
 
+  // ---------- 重启服务 ----------
+  restartServer() {
+    wx.showModal({
+      title: '重启服务',
+      content: '确定要重启服务端吗？连接会短暂中断。',
+      confirmText: '重启',
+      confirmColor: '#da3633',
+      success: (res) => {
+        if (!res.confirm) return;
+        wx.showLoading({ title: '重启中...', mask: true });
+        const server = this.data.server.trim();
+        const token = this.data.token.trim();
+        const url = server.replace(/^ws/, 'http') + '/api/restart';
+        wx.request({
+          url,
+          method: 'POST',
+          header: token ? { 'Authorization': `Bearer ${token}` } : {},
+          timeout: 5000,
+          success: () => {
+            wx.hideLoading();
+            wx.showToast({ title: '服务重启中', icon: 'success', duration: 2000 });
+            // 断开旧连接，等待 3 秒后重连
+            if (this._ws) { try { this._ws.close(); } catch (_) {} this._ws = null; }
+            this.setData({ connected: false });
+            setTimeout(() => {
+              if (!this.data.running) this._autoStart();
+            }, 3000);
+          },
+          fail: (err) => {
+            wx.hideLoading();
+            wx.showToast({ title: '重启失败', icon: 'error', duration: 2000 });
+            console.error('restart failed:', err);
+          },
+        });
+      },
+    });
+  },
+
   // ---------- 文字输入 ----------
   onInput(e) { this.setData({ textIn: e.detail.value }); },
 

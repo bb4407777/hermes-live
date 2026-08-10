@@ -18,7 +18,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .spacer { flex: 1; }
 .icon-btn { font-size: 36rpx; color: #8b949e; padding: 4rpx 12rpx; }
 
-/* 控件行：音色 / 语速 / 打断 */
+/* 控件行：音色 / 语速 / 重启 */
 .controls { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 24rpx; border-top: 1rpx solid #21262d; }
 .picker-wrap { display: inline-block; }
 .picker-btn  { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; border-radius: 10rpx;
@@ -26,6 +26,8 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .ctrl-btn    { background: #161b22; color: #e6edf3; border: 1rpx solid #21262d; border-radius: 10rpx;
                padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; }
 .ctrl-btn.dim { color: #444d56; border-color: #21262d; }
+.restart-btn { background: #da3633; color: #fff; border: 1rpx solid #f85149; border-radius: 10rpx;
+               padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; margin-left: auto; }
 
 /* 语音球 */
 .orb-area  { display: flex; flex-direction: column; align-items: center; padding: 24rpx 0 18rpx; border-top: 1rpx solid #21262d; }

@@ -108,6 +108,23 @@ async def handle_health(request: web.Request) -> web.Response:
     })
 
 
+async def handle_restart(request: web.Request) -> web.Response:
+    """重启服务：延迟 1s 返回响应后 execv 重启自己。"""
+    _check_token(request)
+    import os
+    import sys
+
+    logger.info("收到重启请求，1 秒后重启...")
+
+    async def delayed_restart():
+        await asyncio.sleep(1)
+        logger.info("执行重启：%s %s", sys.executable, sys.argv)
+        os.execv(sys.executable, [sys.executable, "-m", "server.main"])
+
+    asyncio.create_task(delayed_restart())
+    return web.json_response({"ok": True, "message": "服务将在 1 秒后重启"})
+
+
 async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue) -> None:
     """唯一写者：保证多任务出站消息不交错。"""
     while True:
@@ -197,6 +214,7 @@ def build_app(cfg, preload: bool = True) -> web.Application:
 
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/health", handle_health)
+    app.router.add_post("/api/restart", handle_restart)
     app.router.add_post("/api/files/upload", handle_upload)
     app.router.add_options("/api/files/upload", handle_upload_options)
     app.router.add_get("/ws", handle_ws)
