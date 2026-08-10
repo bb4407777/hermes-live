@@ -146,6 +146,18 @@ class Session:
                 self.cfg.tts_rate = str(r)
             self.send_json("hello", session_id=self.hermes.session_id,
                            voice=self.cfg.tts_voice, asr_model=self.cfg.asr_model)
+        elif t == "restart":
+            import os
+            import sys
+            logger.info("收到 WS 重启请求，1 秒后重启...")
+            self.send_json("restarting")
+
+            async def _do_restart() -> None:
+                await asyncio.sleep(1)
+                logger.info("执行重启：%s %s", sys.executable, sys.argv)
+                os.execv(sys.executable, [sys.executable, "-m", "server.main"])
+
+            asyncio.create_task(_do_restart())
 
     async def close(self) -> None:
         self.closed = True
