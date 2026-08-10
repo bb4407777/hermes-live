@@ -140,7 +140,8 @@ Page({
         this._player.endTurn();
         break;
       case 'asr_partial':
-        this.setData({ partialText: msg.text });
+        // 更新实时字幕，同时滚动到底部让 partial 气泡保持可见
+        this.setData({ partialText: msg.text, scrollInto: 'partial-bubble' });
         break;
       case 'asr_final':
         this.setData({ partialText: '' });

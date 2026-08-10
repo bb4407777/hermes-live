@@ -1,38 +1,42 @@
 <view class="page">
-  <!-- 头部第一行：标题 + 状态 + 快捷按钮 -->
-  <view class="topbar">
-    <text class="title">哈尔密斯</text>
-    <text class="status">{{stateLabel}}</text>
-    <view class="dot {{connected ? 'on' : ''}}"></view>
-    <view class="spacer"></view>
-    <view class="icon-btn" bindtap="newSession">↺</view>
-    <view class="icon-btn" bindtap="openSetup">⚙</view>
-  </view>
-
-  <!-- 头部第二行：音色 + 语速 + 打断 -->
-  <view class="controls">
-    <picker class="picker-wrap" mode="selector" range="{{voiceLabels}}" value="{{voiceIdx}}" bindchange="onVoiceChange">
-      <view class="picker-btn">{{voiceLabels[voiceIdx]}} ▾</view>
-    </picker>
-    <picker class="picker-wrap" mode="selector" range="{{rateLabels}}" value="{{rateIdx}}" bindchange="onRateChange">
-      <view class="picker-btn">{{rateLabels[rateIdx]}} ▾</view>
-    </picker>
-    <view class="spacer"></view>
-    <view class="ctrl-btn {{canInterrupt ? '' : 'dim'}}" bindtap="interrupt">打断</view>
-  </view>
-
-  <!-- 语音球 + 状态标签 -->
-  <view class="orb-area">
-    <view class="orb-wrap" bindtap="toggle">
-      <view class="orb {{state}}"></view>
+  <!-- 固定头部：topbar + controls + 语音球，不随对话滚动 -->
+  <view class="header-fixed">
+    <!-- 第一行：标题 + 状态 + 快捷按钮 -->
+    <view class="topbar">
+      <text class="title">哈尔密斯</text>
+      <text class="status">{{stateLabel}}</text>
+      <view class="dot {{connected ? 'on' : ''}}"></view>
+      <view class="spacer"></view>
+      <view class="icon-btn" bindtap="newSession">↺</view>
+      <view class="icon-btn" bindtap="openSetup">⚙</view>
     </view>
-    <text class="orb-label">{{running ? '点击停止' : '点击开始'}}</text>
-    <text class="partial-text" wx:if="{{partialText}}">{{partialText}}</text>
+
+    <!-- 第二行：音色 + 语速 + 打断 -->
+    <view class="controls">
+      <picker class="picker-wrap" mode="selector" range="{{voiceLabels}}" value="{{voiceIdx}}" bindchange="onVoiceChange">
+        <view class="picker-btn">{{voiceLabels[voiceIdx]}} ▾</view>
+      </picker>
+      <picker class="picker-wrap" mode="selector" range="{{rateLabels}}" value="{{rateIdx}}" bindchange="onRateChange">
+        <view class="picker-btn">{{rateLabels[rateIdx]}} ▾</view>
+      </picker>
+      <view class="spacer"></view>
+      <view class="ctrl-btn {{canInterrupt ? '' : 'dim'}}" bindtap="interrupt">打断</view>
+    </view>
+
+    <!-- 语音球 + 状态标签 -->
+    <view class="orb-area">
+      <view class="orb-wrap" bindtap="toggle">
+        <view class="orb {{state}}"></view>
+      </view>
+      <text class="orb-label">{{running ? '点击停止' : '点击开始'}}</text>
+    </view>
   </view>
 
-  <!-- 对话记录 -->
+  <!-- 对话记录（实时字幕作为最后一条临时气泡渲染在此） -->
   <scroll-view class="transcript" scroll-y scroll-into-view="{{scrollInto}}" scroll-with-animation>
     <view wx:for="{{messages}}" wx:key="id" id="m{{item.id}}" class="bubble {{item.cls}}">{{item.text}}</view>
+    <!-- 实时转写：显示为用户侧半透明气泡，VAD 结束后由 asr_final 替换为正式气泡 -->
+    <view wx:if="{{partialText}}" id="partial-bubble" class="bubble user partial">{{partialText}}</view>
     <view class="pad"></view>
   </scroll-view>
 
