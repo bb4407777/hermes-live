@@ -33,13 +33,39 @@ _HALLUCINATIONS = (
     "谢谢观看", "感谢观看", "请订阅", "字幕由",
     "谢谢大家", "谢谢收看", "版权所有", "纯音乐", "请打开字幕",
     "请准确转写",   # 静音/噪声段复读 initial_prompt 尾巴（2026-08-10 实发）
+    # 以下来自 BaiLongma 实测整理
+    "字幕", "翻译", "感谢收看", "点赞", "转发", "打赏",
+    "作词", "作曲", "制作人", "出品", "版权",
+    "subtitles by", "thank you for watching", "please subscribe",
+    "amara.org", "translated by",
 )
+
+import re as _re
 
 
 def _is_hallucination(text: str) -> bool:
+    if not text or not text.strip():
+        return True
+    t = text.strip()
+    # 纯标点/特殊字符
+    if _re.match(r'^[\s\W]+$', t):
+        return True
+    # 过短（单字）
+    if len(t) <= 1:
+        return True
+    # 关键词命中
+    tl = t.lower()
     for h in _HALLUCINATIONS:
-        if h in text:
+        if h.lower() in tl:
             return True
+    # 单字符重复（"啊啊啊啊"、"嗯嗯嗯嗯"）
+    unique = set(c for c in t if c.strip())
+    if len(unique) <= 2 and len(t) >= 5:
+        return True
+    # 短语级重复（"我会说,我会说,我会说"）
+    parts = [p.strip() for p in _re.split(r'[,，。！？\n]', t) if p.strip()]
+    if len(parts) >= 4 and len(set(parts)) <= 2:
+        return True
     return False
 
 
