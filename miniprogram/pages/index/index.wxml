@@ -54,9 +54,6 @@
       <view class="dlabel">服务器地址</view>
       <input class="dinput" value="{{server}}" bindinput="onServerInput"
              placeholder="wss://live.gaochengbin.com" placeholder-class="ph"/>
-      <view class="dlabel">Token（留空即可）</view>
-      <input class="dinput" value="{{token}}" bindinput="onTokenInput"
-             placeholder="auth_token（默认不需要）" placeholder-class="ph"/>
       <view class="dtip">默认走 Cloudflare Tunnel（wss://live.gaochengbin.com），家里 WiFi 可改 ws://192.168.5.50:8698</view>
       <view class="drow">
         <view class="dcancel" bindtap="cancelSetup">取消</view>
