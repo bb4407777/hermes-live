@@ -49,7 +49,9 @@ class Config:
     barge_preroll_ms: int = 500
 
     # ASR
-    asr_backend: str = "auto"           # auto | sherpa | whispercpp | faster
+    asr_backend: str = "auto"           # auto | doubao | sherpa | whispercpp | faster
+    # doubaoime 豆包逆向云端 ASR（优先级最高；需联网；依赖 doubaoime-asr 包）
+    asr_doubao_credential_path: str = str(Path.home() / ".config/doubao-asr/credentials.json")
     # sherpa-onnx 流式 paraformer（优先；模型与 expression-trainer 共用，无需另行下载）
     asr_sherpa_model_dir: str = "/Users/gao/clone/expression-trainer/models/sherpa-onnx-streaming-paraformer-bilingual-zh-en"
     asr_sherpa_threads: int = 4

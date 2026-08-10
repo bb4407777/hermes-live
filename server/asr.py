@@ -1,11 +1,14 @@
-"""ASR 后端：sherpa-onnx 流式（首选）+ whisper.cpp / faster-whisper（批量兜底）。
+"""ASR 后端：doubaoime（豆包逆向，云端流式）> sherpa-onnx 流式 > whisper 批量兜底。
 
 backend 实测（M1 Pro，2.9s 中文测试音频，2026-08-09）：
+  doubaoime（豆包输入法 WebSocket）        —— 云端，中文极准，实时中间结果，RTF 受网络影响
   sherpa-onnx streaming paraformer (CPU)  —— RTF≈0.05，边说边出字，VAD 触发即取结果（≈0延迟）
   whispercpp (turbo q5_0, Metal)          —— RTF≈0.35，一次性转写，VAD 后额外等 1s
   faster-whisper large-v3-turbo int8      —— RTF≈1.2，太慢，仅最终兜底
 
 架构：
+  DoubaoStreamingASR  —— 流式；每话轮建一个 WebSocket，逐帧喂 PCM，服务端返回中间/最终结果。
+                          VAD 触发 end 时调 finish() 拿最终文本。需网络，凭据自动注册缓存。
   SherpaStreamingASR  —— 流式；由 Session.on_audio 在 listening 态逐帧 feed；
                           VAD 触发 end 时调 get_result()（同步，近似零等待）。
   ASR                 —— 批量；仅 --text CLI 路径或 sherpa 不可用时使用。
@@ -13,6 +16,7 @@ backend 实测（M1 Pro，2.9s 中文测试音频，2026-08-09）：
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from pathlib import Path
@@ -36,6 +40,132 @@ def _is_hallucination(text: str) -> bool:
         if h in text:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# 流式 ASR（豆包输入法逆向，云端）
+# ---------------------------------------------------------------------------
+
+class DoubaoStreamingASR:
+    """豆包输入法 WebSocket ASR：每话轮建一个会话，逐帧喂 PCM16，服务端返回中间/最终结果。
+
+    用法：
+        asr = DoubaoStreamingASR(cfg)
+        ok = asr.load()                # 检查依赖（只检查，不建连接）
+        # —— listening 阶段 ——
+        asr.start_turn()               # 开始一个新话轮，建 WebSocket 连接
+        asr.feed(pcm16_bytes)          # 每帧调用（1024 字节 = 512 样本 @16k）
+        # —— VAD 触发 end ——
+        partial = asr.get_partial()    # 取当前中间文本（用于实时字幕）
+        text = asr.finish()            # 发 LAST 帧 → 等待最终结果
+        asr.reset()                    # 清理，准备下一轮
+
+    注意：feed()/finish() 都是同步接口，内部用 asyncio 事件队列桥接 WebSocket。
+    由于 session.py 在 asyncio 事件循环里调用这些方法，内部用 asyncio.Queue 与
+    后台 WebSocket 协程通信，不阻塞事件循环。
+    """
+
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self._available = False
+        self._config = None           # doubaoime_asr.ASRConfig 实例
+        # 每话轮状态
+        self._pcm_queue: asyncio.Queue | None = None
+        self._result_future: asyncio.Future | None = None
+        self._partial: str = ""
+        self._task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def load(self) -> bool:
+        try:
+            from doubaoime_asr import ASRConfig
+            self._config = ASRConfig(
+                credential_path=self.cfg.asr_doubao_credential_path,
+            )
+            self._available = True
+            logger.info("doubaoime-asr ready（豆包云端 ASR）")
+            return True
+        except ImportError:
+            logger.info("doubaoime_asr 未安装，跳过豆包 ASR")
+            return False
+        except Exception as e:
+            logger.warning("doubaoime-asr 初始化失败：%s", e)
+            return False
+
+    def start_turn(self) -> None:
+        """开始新话轮：初始化队列，启动后台 WebSocket 任务。"""
+        if not self._available:
+            return
+        loop = asyncio.get_event_loop()
+        self._loop = loop
+        self._pcm_queue = asyncio.Queue()
+        self._result_future = loop.create_future()
+        self._partial = ""
+        self._task = loop.create_task(self._run_session())
+
+    async def _run_session(self) -> None:
+        from doubaoime_asr import ASRConfig
+        from doubaoime_asr.asr import ResponseType
+        from doubaoime_asr import transcribe_realtime
+
+        async def pcm_gen():
+            while True:
+                chunk = await self._pcm_queue.get()
+                if chunk is None:
+                    return
+                yield chunk
+
+        final_text = ""
+        try:
+            async for resp in transcribe_realtime(pcm_gen(), config=self._config):
+                if resp.type.name == "INTERIM_RESULT":
+                    self._partial = resp.text
+                elif resp.type.name == "FINAL_RESULT":
+                    final_text = resp.text
+                elif resp.type.name == "ERROR":
+                    logger.warning("doubao ASR 错误：%s", resp.error_msg)
+                    break
+        except Exception as e:
+            logger.warning("doubao ASR 会话异常：%s", e)
+        finally:
+            if self._result_future and not self._result_future.done():
+                self._result_future.set_result(final_text)
+
+    def feed(self, pcm16: bytes) -> str:
+        """喂一帧 PCM16（1024 字节）。返回当前中间文本（可能为空）。"""
+        if not self._available or self._pcm_queue is None:
+            return ""
+        self._pcm_queue.put_nowait(pcm16)
+        return self._partial
+
+    async def finish(self) -> str:
+        """VAD 触发 end 后调用：发结束信号，等待最终识别结果。"""
+        if not self._available or self._pcm_queue is None:
+            return ""
+        self._pcm_queue.put_nowait(None)   # 关闭音频流
+        if self._result_future:
+            try:
+                text = await asyncio.wait_for(self._result_future, timeout=8.0)
+                return text.strip()
+            except asyncio.TimeoutError:
+                logger.warning("doubao ASR 超时，返回中间结果：%r", self._partial)
+                return self._partial.strip()
+        return ""
+
+    def get_partial(self) -> str:
+        return self._partial
+
+    def reset(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
+        self._pcm_queue = None
+        self._result_future = None
+        self._partial = ""
+
+    @property
+    def available(self) -> bool:
+        return self._available
 
 
 # ---------------------------------------------------------------------------
