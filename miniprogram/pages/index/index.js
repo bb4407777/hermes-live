@@ -27,7 +27,7 @@ Page({
     scrollInto: '',
     showSetup: false,
     voiceIdx: 0, voiceLabels: VOICES.map(v => v.label),
-    rateIdx: 0,  rateLabels: RATES.map(r => r.label),
+    rateIdx: 2,  rateLabels: RATES.map(r => r.label),
   },
   _ws: null, _rec: null, _player: null,
   _agentMsgId: null, _agentTurn: -1, _msgSeq: 0,
