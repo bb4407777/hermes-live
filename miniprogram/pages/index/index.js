@@ -222,31 +222,38 @@ Page({
       confirmColor: '#da3633',
       success: (res) => {
         if (!res.confirm) return;
-        wx.showLoading({ title: '重启中...', mask: true });
-        const server = this.data.server.trim();
-        const token = this.data.token.trim();
-        const url = server.replace(/^ws/, 'http') + '/api/restart';
-        wx.request({
-          url,
-          method: 'POST',
-          header: token ? { 'Authorization': `Bearer ${token}` } : {},
-          timeout: 5000,
-          success: () => {
-            wx.hideLoading();
-            wx.showToast({ title: '服务重启中', icon: 'success', duration: 2000 });
-            // 断开旧连接，等待 3 秒后重连
-            if (this._ws) { try { this._ws.close(); } catch (_) {} this._ws = null; }
-            this.setData({ connected: false });
-            setTimeout(() => {
-              if (!this.data.running) this._autoStart();
-            }, 3000);
-          },
-          fail: (err) => {
-            wx.hideLoading();
-            wx.showToast({ title: '重启失败', icon: 'error', duration: 2000 });
-            console.error('restart failed:', err);
-          },
-        });
+        if (this._ws) {
+          // 优先走已有 WebSocket（绕过 wx.request 域名白名单限制）
+          this._sendJson({ type: 'restart' });
+          wx.showToast({ title: '服务重启中', icon: 'success', duration: 2000 });
+          setTimeout(() => {
+            if (!this.data.running) this._autoStart();
+          }, 5000);
+        } else {
+          // 无 WS 连接时降级走 HTTP（仅限局域网直连场景）
+          wx.showLoading({ title: '重启中...', mask: true });
+          const server = this.data.server.trim();
+          const token = this.data.token.trim();
+          const url = server.replace(/^ws/, 'http') + '/api/restart';
+          wx.request({
+            url,
+            method: 'POST',
+            header: token ? { 'Authorization': `Bearer ${token}` } : {},
+            timeout: 5000,
+            success: () => {
+              wx.hideLoading();
+              wx.showToast({ title: '服务重启中', icon: 'success', duration: 2000 });
+              setTimeout(() => {
+                if (!this.data.running) this._autoStart();
+              }, 5000);
+            },
+            fail: (err) => {
+              wx.hideLoading();
+              wx.showToast({ title: '重启失败（未连接）', icon: 'error', duration: 2000 });
+              console.error('restart failed:', err);
+            },
+          });
+        }
       },
     });
   },
