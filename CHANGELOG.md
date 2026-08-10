@@ -24,6 +24,7 @@
 - **ASR 切回原始 large-v3，最终落 whisper.cpp Metal**：`asr_backend: whispercpp` + `models/ggml/ggml-large-v3-q5_0.bin`（ModelScope `timeless/whispercpp` 下载，HF xet CDN 本机直连超时）；实测 RTF 0.47（faster-whisper CPU int8 为 1.37，约 3 倍提速）
 - faster-whisper large-v3 权重（`models/faster-whisper-large-v3`，ModelScope `keepitsimple/faster-whisper-large-v3`）保留作兜底
 - **替换应用图标**：使用 `~/Downloads/9154.png`（640×640 RGBA 黑白漫画风人像）作主图，`scripts/gen_icons.py` 一键重出 macOS iconset（10 档 RGBA）+ iOS 1024（白底 RGB，无 alpha 满足 App Store）+ xcassets 三处源 + 网页 favicon（`web/favicon.png`，`index.html` 挂 `<link rel="icon">`）；旧 `assets/icon-source.jpg` 进回收站
+- **token 不再硬编码入库**：`miniprogram/app.js` 移除默认内置 auth_token，只从 `wx.getStorageSync('hl_token')` 读取；服务端 token 仍仅存 gitignored `config.yaml`（2026-08-11 定：禁随仓库外泄；老用户手机存储已缓存，不受影响）
 
 ## [0.4.4] - 2026-08-10
 

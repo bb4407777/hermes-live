@@ -4,6 +4,6 @@
 App({
   globalData: {
     server: wx.getStorageSync('hl_server') || 'wss://live.gaochengbin.com',
-    token:  wx.getStorageSync('hl_token')  || '6ce0c106f25085ae0d71d76d2eb241b6'   // 默认内置（小程序仅本人可登，2026-08-10 高律师定）
+    token:  wx.getStorageSync('hl_token')  || ''   // token 仅从本机存储读取，不硬编码入库（2026-08-11 定：禁随仓库外泄）
   }
 });
