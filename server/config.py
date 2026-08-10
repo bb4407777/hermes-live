@@ -63,7 +63,8 @@ class Config:
     asr_beam_size: int = 1
     asr_initial_prompt: str = (
         "以下是律师事务所的普通话工作对话，说话人可能提及案件当事人、法院、合同条款等法律词汇，"
-        "也可能谈及日常事务。请准确转写。"
+        "也可能谈及日常事务。"
+        # 注：结尾禁放祈使句（如"请准确转写。"）——whisper 在静音/噪声段会复读提示词尾巴当转写结果
     )
     asr_no_speech_prob_max: float = 0.5  # 原 0.6，收紧后静音段更容易被过滤
     asr_avg_logprob_min: float = -1.2
