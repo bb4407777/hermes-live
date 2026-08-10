@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **asr_backend 分流错误**：`whispercpp`/`faster` 档此前会被 `!= "doubao"` 分支拦截、实际仍加载 sherpa；现仅 `auto`/`sherpa 才走 sherpa 流式，批量 ASR 配置真正生效
+- **doubao ASR 空结果**：实测 session 每次立即结束（result=''），暂弃用，配置切回 faster-whisper
+
+### Changed
+- **ASR 切回原始 large-v3**：`asr_backend: faster` + 本地权重目录 `models/faster-whisper-large-v3`（ModelScope 下载，规避 HF xet CDN 直连超时）
+
 ## [0.4.4] - 2026-08-10
 
 ### Added
