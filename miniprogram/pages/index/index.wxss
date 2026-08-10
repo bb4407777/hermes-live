@@ -56,7 +56,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .pad { height: 16rpx; }
 
 /* 文字输入 */
-.footer   { display: flex; gap: 14rpx; padding: 14rpx 24rpx; align-items: center; border-top: 1rpx solid #21262d; }
+.footer   { display: flex; gap: 14rpx; padding: 14rpx 24rpx; align-items: center; border-top: 1rpx solid #21262d; flex-shrink: 0; }
 .textin   { flex: 1; background: #161b22; border: 1rpx solid #21262d; border-radius: 12rpx;
             padding: 14rpx 20rpx; font-size: 28rpx; color: #e6edf3; min-width: 0; }
 .ph       { color: #8b949e; }
