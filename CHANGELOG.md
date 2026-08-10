@@ -7,6 +7,7 @@
 - **doubao ASR 空结果**：实测 session 每次立即结束（result=''），暂弃用，配置切回 faster-whisper
 
 ### Changed
+- **恢复流式朗读**：SSE 边生成边分句送 TTS，回退 0.4.3 的「等全量返回再统一入队」（保留禁 barge-in）；实测首句 3.74s / 首音 5.0s / 整轮播完 37.06s（高律师 2026-08-10 定）
 - **ASR 切回原始 large-v3，最终落 whisper.cpp Metal**：`asr_backend: whispercpp` + `models/ggml/ggml-large-v3-q5_0.bin`（ModelScope `timeless/whispercpp` 下载，HF xet CDN 本机直连超时）；实测 RTF 0.47（faster-whisper CPU int8 为 1.37，约 3 倍提速）
 - faster-whisper large-v3 权重（`models/faster-whisper-large-v3`，ModelScope `keepitsimple/faster-whisper-large-v3`）保留作兜底
 
