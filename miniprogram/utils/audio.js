@@ -7,15 +7,21 @@ class Recorder {
   constructor(onFrame) {
     this.onFrame = onFrame;
     this.running = false;
+    this._paused = false;
+    this._rmRunning = false;       // RecorderManager 实际是否在跑
     this._buf = new Uint8Array(0);
     this.rm = wx.getRecorderManager();
     this.rm.onFrameRecorded(({ frameBuffer }) => {
-      if (!this.running || this._paused || !frameBuffer) return;
+      if (!this.running || this._paused || !frameBuffer) return;  // 暂停时帧直接丢弃
       this._push(new Uint8Array(frameBuffer));
     });
     this.rm.onError((e) => console.error('recorder error', e));
-    // 微信录音有 duration 上限，到点自动续（onStop 时若 running 且未主动暂停则重启）
-    this.rm.onStop(() => { if (this.running && !this._paused) this._start(); });
+    // onStop 只在两种情况触发：① duration 到期自动停  ② stop() 主动停
+    // pause() 不再调 rm.stop()，所以这里不会因 pause 被触发
+    this.rm.onStop(() => {
+      this._rmRunning = false;
+      if (this.running && !this._paused) this._start();  // duration 到期自动续
+    });
   }
 
   // RecorderManager 的 PCM 帧长不固定，本地缓冲重切成 1024B 定长帧
@@ -31,6 +37,7 @@ class Recorder {
   }
 
   _start() {
+    this._rmRunning = true;
     this.rm.start({
       format: 'PCM',
       sampleRate: 16000,
@@ -44,26 +51,32 @@ class Recorder {
     return new Promise((resolve, reject) => {
       wx.authorize({
         scope: 'scope.record',
-        success: () => { this.running = true; this._paused = false; this._buf = new Uint8Array(0); this._start(); resolve(); },
+        success: () => {
+          this.running = true; this._paused = false;
+          this._buf = new Uint8Array(0); this._start(); resolve();
+        },
         fail: () => reject(new Error('未授权麦克风，请在右上角设置里打开'))
       });
     });
   }
 
-  /** 半双工暂停：speaking 时调用，停止采集防喇叭回声进麦 */
+  /** 半双工暂停：speaking 时调用，丢帧但不停 RecorderManager。
+   *  不调 rm.stop() 的原因：iOS 停录会把音频会话从 PlayAndRecord 切到 Playback，
+   *  触发 WebAudio context 中断，导致正在播放的 TTS 出现"卡卡卡"断帧。
+   *  onFrameRecorded 里已有 _paused 门控，停着跑不会发出任何帧。 */
   pause() {
     if (!this.running || this._paused) return;
     this._paused = true;
-    this._buf = new Uint8Array(0);  // 清残帧
-    try { this.rm.stop(); } catch (_) {}
+    this._buf = new Uint8Array(0);
   }
 
-  /** 半双工恢复：listening 时调用，重新开始采集 */
+  /** 半双工恢复：listening 时调用。
+   *  若 RecorderManager 已因 duration 到期自停，补一次 _start()。 */
   resume() {
     if (!this.running || !this._paused) return;
     this._paused = false;
     this._buf = new Uint8Array(0);
-    this._start();
+    if (!this._rmRunning) this._start();
   }
 
   stop() { this.running = false; this._paused = false; try { this.rm.stop(); } catch (_) {} }

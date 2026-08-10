@@ -44,7 +44,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
 
 /* 对话记录 */
-.transcript { flex: 1; padding: 16rpx 24rpx; box-sizing: border-box; }
+.transcript { flex: 1; height: 0; padding: 16rpx 24rpx; box-sizing: border-box; }
 .bubble { max-width: 84%; padding: 14rpx 22rpx; border-radius: 18rpx; margin: 10rpx 0;
           font-size: 28rpx; line-height: 1.55; word-break: break-all; white-space: pre-wrap; }
 .bubble.user  { background: #1f6feb; margin-left: auto; }
