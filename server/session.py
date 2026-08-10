@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 FRAME_BYTES = 1024  # 512 样本 * 2 字节
 ECHO_GUARD_S = 0.3  # speaking→listening 后的余声忽略窗
+TTS_ECHO_WINDOW_S = 30.0  # 最近 N 秒内说过的句子参与文本回声比对
+TTS_ECHO_RATIO = 0.55     # SequenceMatcher ratio 超过此值判定为回声
 
 
 class Session:
@@ -56,6 +58,7 @@ class Session:
         self.ptt = False               # 按住说话模式：listening 态不跑 VAD，等 utterance_end 收口
         self._ptt_buf: list[bytes] = []  # PTT 期间攒的帧（batch ASR 兜底用）
         self.closed = False
+        self._recent_tts_texts: list[tuple[float, str]] = []  # (timestamp, sentence) 回声过滤缓冲
 
     # ---------- 出站 ----------
 
@@ -70,6 +73,29 @@ class Session:
     def _set_state(self, state: str) -> None:
         self.state = state
         self.send_json("state", state=state, turn=self.turn)
+
+    # ---------- 文本回声过滤 ----------
+
+    def _record_tts_sentence(self, sentence: str) -> None:
+        """记录刚发出的 TTS 句子，供 ASR 回声比对。"""
+        now = time.monotonic()
+        self._recent_tts_texts.append((now, sentence))
+        # 只保留窗口内的条目
+        cutoff = now - TTS_ECHO_WINDOW_S
+        self._recent_tts_texts = [(t, s) for t, s in self._recent_tts_texts if t > cutoff]
+
+    def _is_tts_echo(self, asr_text: str) -> bool:
+        """ASR 结果与近期 TTS 文本相似度过高 → 判定为回声，丢弃。"""
+        import difflib
+        now = time.monotonic()
+        for ts, tts in self._recent_tts_texts:
+            if now - ts > TTS_ECHO_WINDOW_S:
+                continue
+            ratio = difflib.SequenceMatcher(None, asr_text, tts).ratio()
+            if ratio >= TTS_ECHO_RATIO:
+                logger.info("文本回声过滤: ASR=%r ≈ TTS=%r (ratio=%.2f)", asr_text, tts, ratio)
+                return True
+        return False
 
     # ---------- 入站 ----------
 
@@ -231,6 +257,12 @@ class Session:
                     if self.turn == t:
                         self._enter_listening()
                     return
+                # 文本回声过滤：ASR 结果与近期 TTS 高度相似 → 自己的声音录进去了，丢弃
+                if self._is_tts_echo(text):
+                    tts_task.cancel()
+                    if self.turn == t:
+                        self._enter_listening()
+                    return
                 self.send_json("asr_final", turn=t, text=text)
             else:
                 m.mark("asr_done")
@@ -328,6 +360,7 @@ class Session:
                     break
                 sentence, chunks, inflight = item
                 self.send_json("tts_sentence", turn=t, text=sentence)
+                self._record_tts_sentence(sentence)  # 存入回声缓冲，供 ASR 比对
                 while True:
                     pcm = await chunks.get()
                     if pcm is None:
