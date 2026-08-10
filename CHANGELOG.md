@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.6] - 2026-08-10
+
+### Security
+- **隧道流量强制 token 校验**：cloudflared 经本机回环转发，此前被 `_check_token` 回环豁免整体放行，`live.gaochengbin.com` 实际无密码暴露公网；现对带 `Cf-Ray` 头的请求强制 token（`?token=` 与 `Authorization: Bearer` 均认），公网无 token 实测 401
+
+### Fixed
+- `_check_token` 接受 Bearer 头（此前只认 query，重启按钮在 LAN 下会 401）
+
 ## [0.4.5] - 2026-08-10
 
 ### Changed
