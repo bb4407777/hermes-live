@@ -23,6 +23,7 @@
 - **恢复流式朗读**：SSE 边生成边分句送 TTS，回退 0.4.3 的「等全量返回再统一入队」（保留禁 barge-in）；实测首句 3.74s / 首音 5.0s / 整轮播完 37.06s（高律师 2026-08-10 定）
 - **ASR 切回原始 large-v3，最终落 whisper.cpp Metal**：`asr_backend: whispercpp` + `models/ggml/ggml-large-v3-q5_0.bin`（ModelScope `timeless/whispercpp` 下载，HF xet CDN 本机直连超时）；实测 RTF 0.47（faster-whisper CPU int8 为 1.37，约 3 倍提速）
 - faster-whisper large-v3 权重（`models/faster-whisper-large-v3`，ModelScope `keepitsimple/faster-whisper-large-v3`）保留作兜底
+- **替换应用图标**：使用 `~/Downloads/9154.png`（640×640 RGBA 黑白漫画风人像）作主图，`scripts/gen_icons.py` 一键重出 macOS iconset（10 档 RGBA）+ iOS 1024（白底 RGB，无 alpha 满足 App Store）+ xcassets 三处源；旧 `assets/icon-source.jpg` 进回收站
 
 ## [0.4.4] - 2026-08-10
 
