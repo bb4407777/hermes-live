@@ -39,7 +39,8 @@ class Config:
     # VAD / 分段
     vad_threshold: float = 0.5          # listening 档语音概率阈值
     vad_start_frames: int = 6           # 连续 6 帧（192ms）判入语音段
-    vad_end_silence_ms: int = 800       # 尾静音多久判段结束（原 1200；800ms 平衡中文停顿与响应速度）
+    vad_end_silence_ms: int = 1100      # 尾静音多久判段结束（800 时思考停顿"那个…"被切碎单独成轮，
+                                        # 高律师 2026-08-11 定调回 1100：每轮多等 0.3s 换少切碎）
     vad_min_utterance_ms: int = 300     # 短于此丢弃（咳嗽/键盘）
     vad_max_utterance_ms: int = 30000   # 强制截断
     vad_preroll_ms: int = 300           # 语音段开头回补

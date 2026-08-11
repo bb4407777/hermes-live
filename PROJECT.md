@@ -7,7 +7,8 @@
 - **定位**：律师事务所内部工具，便于语音快速查询案件、讨论法律问题
 - **版本**：0.4.4（2026-08-10）
 - **仓库**：`ssh://git@ssh.github.com:443/bb4407777/hermes-live.git`
-- **部署**：按需启动，用完即停（16GB 内存让步），不做常驻
+- **部署**：launchd 常驻（`com.gaochengbin.hermes-live`，KeepAlive，高律师 2026-08-11 定：
+  doubao 云端模式内存占用小，非常驻则 Mac 重启后隧道活着、8698 死，手机 502）
 
 ## 技术架构
 
@@ -141,7 +142,7 @@ tts_rate: "+0%"
 
 # VAD
 vad_threshold: 0.5           # listening 档阈值
-vad_end_silence_ms: 1200     # 尾静音判段结束（中文停顿长）
+vad_end_silence_ms: 1100     # 尾静音判段结束（800 切碎思考停顿，2026-08-11 定 1100）
 barge_threshold: 0.85        # speaking 档打断阈值
 barge_hold_ms: 320           # 持续时长判打断
 ```
@@ -226,18 +227,24 @@ scripts/smoke.sh
 
 ### 服务启动
 
+**正式运行走 launchd 常驻**（2026-08-11 起）：
+
 ```bash
-# 前台启动（调试）
-.venv/bin/python -m server.main
+# 安装/更新（plist 模板在仓库，改动后重装）
+cp scripts/launchd/com.gaochengbin.hermes-live.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gaochengbin.hermes-live.plist
 
-# 后台启动（日志到文件）
-.venv/bin/python -m server.main > /tmp/hermes-live.log 2>&1 &
+# 重启（自动识别 launchd，走 kickstart -k；网页/小程序重启按钮同此路径）
+scripts/restart-service.sh
 
-# 查看进程
-pgrep -f "python.*server.main"
+# 停用常驻
+launchctl bootout gui/$(id -u)/com.gaochengbin.hermes-live
+```
 
-# 停止服务
-kill $(pgrep -f "python.*server.main")
+调试可前台跑（先 bootout，否则 launchd 已占 8698）：
+
+```bash
+.venv/bin/python -m server.main --port 8699   # 换端口最省事
 ```
 
 ### 小程序发布
@@ -273,13 +280,15 @@ curl -X POST http://127.0.0.1:8698/api/restart \
 
 ### 已知问题
 
-1. ~~doubao ASR 连接偶尔失败~~（0.4.4 已增加详细日志，待验证）
+1. ~~doubao ASR 连接偶尔失败/空结果~~（2026-08-11 已修：根因是 app 级单例被多连接共享互踩 +
+   空闲 ~40s 被豆包远端掐流；现按连接实例化 + VAD start 懒建连 + 单活跃连接 + 前端断线自愈）
 2. 首包延迟 4.1s，Hermes 首 delta 占 3.2s（agent prompt 大，网关池代理慢）
 3. edge-tts 偶尔被风控（概率低，备胎 `say -v Tingting` 可用）
+4. thinking/speaking 态半双工丢帧（Hermes 思考期说话被丢弃）——高律师 2026-08-11 定**不改**：
+   排队下一轮的方案经常出 bug，维持半双工
 
 ### 待办事项
 
-- [ ] doubao ASR 连接稳定性验证（日志已加，等实测）
 - [ ] 首包延迟优化（考虑 Hermes agent prompt 精简）
 - [ ] TTS 备胎方案完善（Piper 本地合成）
 - [ ] 小程序增加历史会话列表

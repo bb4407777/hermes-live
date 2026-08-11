@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hermes-live 常驻（高律师 2026-08-11 定：doubao 云端模式内存占用小，
+       非常驻则 Mac 重启后隧道活着、8698 死了，手机 502）。
+       安装：cp 到 ~/Library/LaunchAgents/ 后
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gaochengbin.hermes-live.plist
+       重启：scripts/restart-service.sh（自动识别 launchd 接管，走 kickstart -k） -->
+  <key>Label</key>
+  <string>com.gaochengbin.hermes-live</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/gao/Code/hermes-live</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gao/Code/hermes-live/.venv/bin/python</string>
+    <string>-m</string>
+    <string>server.main</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- doubao 凭据在 ~/.config/doubao-asr，HOME 必须显式给（gateway plist PATH 教训同款） -->
+    <key>HOME</key>
+    <string>/Users/gao</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/gao/Code/hermes-live/logs/service.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/gao/Code/hermes-live/logs/service.log</string>
+</dict>
+</plist>

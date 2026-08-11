@@ -64,8 +64,24 @@ wait_for_service() {
     return 0
 }
 
+LAUNCHD_LABEL="com.gaochengbin.hermes-live"
+
 main() {
     log "==== Hermes-live 重启开始 ===="
+
+    # launchd 接管时必须走 kickstart：直接 kill 会被 KeepAlive 自动拉起，
+    # 下面的 nohup 再起一个就双进程了
+    if launchctl print "gui/$(id -u)/${LAUNCHD_LABEL}" >/dev/null 2>&1; then
+        log "launchd 模式：kickstart -k ${LAUNCHD_LABEL}"
+        launchctl kickstart -k "gui/$(id -u)/${LAUNCHD_LABEL}"
+        if wait_for_service 8698 30; then
+            log "==== 重启成功（launchd）===="
+            exit 0
+        else
+            log "==== 重启失败：服务未恢复（launchd）===="
+            exit 1
+        fi
+    fi
 
     # 1. 查找现有进程
     local old_pid

@@ -15,6 +15,11 @@
 
 ## [Unreleased]
 
+### Changed
+- **launchd 常驻**（高律师 2026-08-11 定）：`com.gaochengbin.hermes-live` KeepAlive 常驻，Mac 重启/进程崩溃自动拉起（实测 kill -9 后 ~10s 复活）；plist 模板入仓 `scripts/launchd/`；`restart-service.sh` 自动识别 launchd 走 `kickstart -k`（否则 KeepAlive 拉起 + 脚本 nohup 再起一个会双进程），网页/小程序重启按钮同路径，实测重启后单进程
+- **尾静音 800→1100ms**（高律师 2026-08-11 定）：800ms 时思考停顿（"那个…"）被切碎单独成轮，调回 1100 换少切碎，每轮多等 0.3s
+- **半双工维持不改**（高律师 2026-08-11 定）：thinking/speaking 期丢帧不做排队改造——经常出 bug
+
 ### Fixed
 - **断连根因三连修（2026-08-11，网页版"只收音不识别"）**：
   - **doubao ASR 改按连接实例化 + 会话闭包隔离**：此前是 app 级单例被所有 WS 连接的 Session 共享，手机端双连接（autostart 与手点竞态/旧标签残留）互相 reset/覆盖对方会话 → 空结果四连、上轮文本窜入下轮（曾实测"停口→ASR 0.00s"）；0.4.4 期间记录的"session 每次立即结束 result=''"即此根因，当时误判为豆包侧问题
