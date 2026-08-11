@@ -179,6 +179,7 @@ async function toggle() {
 }
 
 els.btnToggle.addEventListener('click', toggle);
+els.orb.addEventListener('click', toggle);
 els.btnInterrupt.addEventListener('click', () => sendJson({ type: 'interrupt' }));
 els.btnNewSession.addEventListener('click', () => {
   sendJson({ type: 'new_session' });
