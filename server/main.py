@@ -119,20 +119,41 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 async def handle_restart(request: web.Request) -> web.Response:
-    """重启服务：延迟 1s 返回响应后 execv 重启自己。"""
+    """重启服务：调用外部脚本重启（参考 areco 模式）。
+
+    用户手动触发的重启（网页按钮）是允许的；AI agent 不得主动调用此接口。
+    外部脚本会优雅停止当前进程并拉起新进程，避免自杀式重启带来的竞态问题。
+    """
     _check_token(request)
-    import os
-    import sys
+    import subprocess
 
-    logger.info("收到重启请求，1 秒后重启...")
+    logger.info("收到重启请求（用户手动触发），调用外部重启脚本...")
 
-    async def delayed_restart():
-        await asyncio.sleep(1)
-        logger.info("执行重启：%s %s", sys.executable, sys.argv)
-        os.execv(sys.executable, [sys.executable, "-m", "server.main"])
+    restart_script = PROJECT_ROOT / "scripts" / "restart-service.sh"
+    if not restart_script.exists():
+        logger.error("重启脚本不存在: %s", restart_script)
+        return web.json_response(
+            {"ok": False, "message": "重启脚本不存在"},
+            status=500
+        )
 
-    asyncio.create_task(delayed_restart())
-    return web.json_response({"ok": True, "message": "服务将在 1 秒后重启"})
+    # 后台启动重启脚本（detached，避免阻塞响应）
+    try:
+        subprocess.Popen(
+            [str(restart_script)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # 完全脱离当前进程组
+        )
+        logger.info("重启脚本已启动，服务将在数秒内重启")
+        return web.json_response({"ok": True, "message": "重启脚本已启动，服务将在数秒内重启"})
+    except Exception as e:
+        logger.error("启动重启脚本失败: %s", e)
+        return web.json_response(
+            {"ok": False, "message": f"启动重启脚本失败: {e}"},
+            status=500
+        )
 
 
 async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue) -> None:
