@@ -84,6 +84,8 @@ function setState(state, turn) {
     curTurn = turn;
     audio.setTurn(turn);   // 清播放缓冲：旧 turn 音频作废
   }
+  // 半双工：speaking/thinking 时停发麦克风帧，listening 时恢复（与小程序行为对齐）
+  audio.setMicPaused(state === 'speaking' || state === 'thinking');
 }
 
 function handleMessage(msg) {

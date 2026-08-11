@@ -14,6 +14,11 @@ export class AudioIO {
     return !!this.ctx;
   }
 
+  // speaking 态暂停发帧（半双工，防回声）；listening 态恢复
+  setMicPaused(paused) {
+    this._micPaused = paused;
+  }
+
   async start() {
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -31,7 +36,7 @@ export class AudioIO {
 
     this.micNode.port.onmessage = (e) => {
       if (e.data && e.data.level !== undefined) this.onLevel(e.data.level);
-      else this.onFrame(e.data); // ArrayBuffer：1024 字节 PCM16 @16k
+      else if (!this._micPaused) this.onFrame(e.data); // 半双工：speaking 态不发帧
     };
     this.playerNode.port.onmessage = (e) => {
       if (e.data && e.data.type === 'done') this.onPlaybackDone(e.data.turn);

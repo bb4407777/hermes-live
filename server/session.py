@@ -137,11 +137,7 @@ class Session:
                 if len(pcm_utt) >= FRAME_BYTES * (self.cfg.vad_min_utterance_ms // 32):
                     self._begin_turn(pcm_utt=pcm_utt)
         elif self.state == "speaking":
-            # barge-in：高门槛 VAD（≥0.85 持续 320ms）触发打断
-            if time.monotonic() >= self.barge_cooldown_until:
-                preroll = self.barge.feed(pcm)
-                if preroll is not None:
-                    asyncio.ensure_future(self._barge_in(preroll))
+            pass  # 半双工：客户端 speaking/thinking 态不发帧，服务端不需要处理
         # thinking / idle：丢弃
 
     async def on_control(self, obj: dict) -> None:
