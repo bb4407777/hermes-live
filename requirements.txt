@@ -2,6 +2,7 @@
 aiohttp>=3.14,<4
 pyyaml>=6
 edge-tts==7.2.8
+kokoro-onnx>=0.9          # 本地 TTS（优先）；pip install kokoro-onnx
 pywhispercpp>=1.5     # 首选 ASR 后端（whisper.cpp，Metal）
 faster-whisper==1.2.1  # 兜底 ASR 后端
 ctranslate2>=4.8.1,<5

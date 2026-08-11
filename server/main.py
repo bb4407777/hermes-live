@@ -198,6 +198,8 @@ def build_app(cfg, preload: bool = True) -> web.Application:
         app["http"] = aiohttp.ClientSession()
         app["hermes"] = HermesClient(cfg, app["http"])
         if preload:
+            # TTS：kokoro 优先，edge-tts 兜底
+            app["tts"].load()
             # 优先豆包云端（联网，中文极准）；失败则 sherpa；再失败则批量 ASR
             if cfg.asr_backend in ("auto", "doubao") and app["doubao_asr"].load():
                 logger.info("ASR: doubaoime（豆包云端流式）ready")

@@ -104,6 +104,8 @@ class DoubaoStreamingASR:
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def load(self) -> bool:
+        if self.cfg.asr_backend not in ("auto", "doubao"):
+            return False
         try:
             from doubaoime_asr import ASRConfig
             self._config = ASRConfig(
@@ -227,6 +229,8 @@ class SherpaStreamingASR:
 
     def load(self) -> bool:
         """尝试初始化。成功返回 True，依赖缺失或模型不存在返回 False。"""
+        if self.cfg.asr_backend not in ("auto", "sherpa"):
+            return False
         if self._recognizer is not None:
             return True
         model_dir = Path(self.cfg.asr_sherpa_model_dir)
@@ -271,6 +275,13 @@ class SherpaStreamingASR:
         while self._recognizer.is_ready(self._stream):
             self._recognizer.decode_stream(self._stream)
         return self._recognizer.get_result(self._stream).strip()
+
+    def is_endpoint(self) -> bool:
+        """sherpa 检测到语音段结束（内部 endpoint_detection 触发）。
+        供 session.on_audio 在 silero VAD 静音期提前关段，减少等待。"""
+        if self._recognizer is None or self._stream is None:
+            return False
+        return self._recognizer.is_endpoint(self._stream)
 
     def get_result(self) -> str:
         """VAD 触发 end 后调用：喂一小段静音 flush → 取最终文本。"""

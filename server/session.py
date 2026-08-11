@@ -126,7 +126,23 @@ class Session:
                 if self.doubao_asr is not None:
                     self.doubao_asr.feed(b"\x00" * FRAME_BYTES)  # 补一帧静音促 flush
                 self._begin_turn(pcm_utt=ev[1].pcm)
-        # speaking / thinking / idle：丢弃（speaking 态停麦在客户端完成，服务端不做 barge-in）
+            elif (ev is None and self.asr_stream is not None
+                  and self.segmenter.in_speech
+                  and self.asr_stream.is_endpoint()):
+                # sherpa 自己的 endpoint_detection 比 silero 静音计时更快感知到段尾；
+                # 在 silero 还没触发 end 时提前收口，减少约 400ms 等待。
+                # segmenter.reset() 先清状态，再取 sherpa 累积的音频。
+                pcm_utt = b"".join(self.segmenter.buf)
+                self.segmenter.reset()
+                if len(pcm_utt) >= FRAME_BYTES * (self.cfg.vad_min_utterance_ms // 32):
+                    self._begin_turn(pcm_utt=pcm_utt)
+        elif self.state == "speaking":
+            # barge-in：高门槛 VAD（≥0.85 持续 320ms）触发打断
+            if time.monotonic() >= self.barge_cooldown_until:
+                preroll = self.barge.feed(pcm)
+                if preroll is not None:
+                    asyncio.ensure_future(self._barge_in(preroll))
+        # thinking / idle：丢弃
 
     async def on_control(self, obj: dict) -> None:
         t = obj.get("type")

@@ -37,7 +37,7 @@ class Config:
     # VAD / 分段
     vad_threshold: float = 0.5          # listening 档语音概率阈值
     vad_start_frames: int = 6           # 连续 6 帧（192ms）判入语音段
-    vad_end_silence_ms: int = 1200      # 尾静音多久判段结束（原 600，中文停顿普遍超 600ms）
+    vad_end_silence_ms: int = 800       # 尾静音多久判段结束（原 1200；800ms 平衡中文停顿与响应速度）
     vad_min_utterance_ms: int = 300     # 短于此丢弃（咳嗽/键盘）
     vad_max_utterance_ms: int = 30000   # 强制截断
     vad_preroll_ms: int = 300           # 语音段开头回补
@@ -71,8 +71,13 @@ class Config:
     asr_download_root: str = str(PROJECT_ROOT / "models")
 
     # TTS
-    tts_voice: str = "zh-CN-XiaoxiaoNeural"
-    tts_rate: str = "+0%"
+    tts_backend: str = "auto"           # auto=kokoro优先,edge-tts兜底 | kokoro=强制本地 | edge=强制云端
+    tts_voice: str = "zh-CN-XiaoxiaoNeural"  # edge-tts 音色
+    tts_rate: str = "+0%"              # edge-tts 语速
+    kokoro_model: str = str(Path(__file__).resolve().parent.parent / "models/kokoro/kokoro-v1.1-zh.onnx")
+    kokoro_voices: str = str(Path(__file__).resolve().parent.parent / "models/kokoro/voices-v1.1-zh.bin")
+    kokoro_voice: str = "zf_001"       # kokoro 音色（zf_001=普通话女声）
+    kokoro_speed: float = 1.0          # kokoro 语速（0.5–2.0）
     tts_lookahead: int = 1              # 预合成句数
 
     # 分句
