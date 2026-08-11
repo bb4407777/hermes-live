@@ -168,6 +168,7 @@ async function toggle() {
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) await connect();
     await audio.start();          // 用户手势内：授权麦克风 + resume AudioContext
+    pushConfig();                 // 连接后立即同步当前语速/音色到服务端
     sendJson({ type: 'start' });
     els.btnToggle.textContent = '停止';
   } catch (err) {

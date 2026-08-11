@@ -17,7 +17,7 @@
   body {
     margin: 0; background: var(--bg); color: var(--fg);
     font: 15px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-    display: flex; flex-direction: column; height: 100vh;
+    display: flex; flex-direction: column; height: 100dvh;
   }
   header { padding: 8px 12px 10px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   header .row { display: flex; align-items: center; gap: 8px; }
@@ -42,7 +42,7 @@
     min-width: 0; flex-shrink: 1;         /* 窄屏允许收窄，靠省略号活下来 */
   }
 
-  #stage { display: flex; flex-direction: column; align-items: center; padding: 26px 0 10px; flex-shrink: 0; }
+  #stage { display: flex; flex-direction: column; align-items: center; padding: 20px 0 8px; flex-shrink: 0; }
   #orb {
     width: 110px; height: 110px; border-radius: 50%;
     background: radial-gradient(circle at 32% 30%, var(--orb1), var(--orb2) 75%);
@@ -114,7 +114,7 @@
       <select id="selRate" title="语速">
         <option value="+0%">语速 1.0x</option>
         <option value="+15%">语速 1.15x</option>
-        <option value="+30%">语速 1.3x</option>
+        <option value="+30%" selected>语速 1.3x</option>
         <option value="-15%">语速 0.85x</option>
       </select>
       <span class="spacer"></span>
