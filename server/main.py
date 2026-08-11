@@ -174,10 +174,30 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=30, max_msg_size=4 * 1024 * 1024)
     await ws.prepare(request)
     app = request.app
+    # 单活跃连接：单用户工具，新连接顶替旧连接。手机端常见双连接
+    # （autostart 与手点竞态、旧标签页残留），两个 Session 并存会抢 ASR 链路。
+    # 不能从这里直接 old_ws.close()——跨协程 close 发不出正常关闭帧（客户端收
+    # 1006，当普通断线重连→互踢循环）。改发应用层 replaced（走旧连接自己的
+    # writer，保证送达顺序），旧前端收到后自己退场；同时把旧 Session 打回
+    # idle，僵尸连接即使不关也不再处理音频，最终由 heartbeat 超时清理。
+    live = app["live_state"]   # 启动后 app[...] 不可写（aiohttp 弃用），状态挂可变 dict
+    old_session: Session | None = live["session"]
+    if old_session is not None and not old_session.closed:
+        logger.info("ws replaced: 旧连接退场")
+        old_session.send_json("replaced")
+        await old_session.on_control({"type": "stop"})
     outbox: asyncio.Queue = asyncio.Queue()
+    # doubao ASR 按连接实例化（load 仅读凭据文件，轻量）：
+    # 会话态 queue/future/task 决不跨连接共享，否则互相 reset/覆盖导致空结果与窜流
+    doubao = None
+    probe = app.get("doubao_asr")
+    if probe is not None and probe.available:
+        doubao = DoubaoStreamingASR(app["cfg"])
+        doubao.load()
     session = Session(app["cfg"], app["asr"], app["tts"], app["hermes"], outbox,
                       asr_stream=app.get("asr_stream"),
-                      doubao_asr=app.get("doubao_asr"))
+                      doubao_asr=doubao)
+    live["session"] = session
     writer = asyncio.create_task(ws_writer(ws, outbox))
     session.send_json("hello", session_id=app["hermes"].session_id,
                       voice=app["cfg"].tts_voice, asr_model=app["cfg"].asr_model)
@@ -197,6 +217,8 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
     finally:
+        if live["session"] is session:
+            live["session"] = None
         await session.close()
         outbox.put_nowait(None)
         with contextlib.suppress(Exception):
@@ -210,6 +232,7 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
 def build_app(cfg, preload: bool = True) -> web.Application:
     app = web.Application()
     app["cfg"] = cfg
+    app["live_state"] = {"session": None}   # 当前活跃 WS 的 Session（单活跃连接）
     app["asr"] = ASR(cfg)
     app["asr_stream"] = SherpaStreamingASR(cfg)
     app["doubao_asr"] = DoubaoStreamingASR(cfg)

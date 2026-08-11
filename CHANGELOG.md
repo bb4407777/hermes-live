@@ -16,8 +16,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **断连根因三连修（2026-08-11，网页版"只收音不识别"）**：
+  - **doubao ASR 改按连接实例化 + 会话闭包隔离**：此前是 app 级单例被所有 WS 连接的 Session 共享，手机端双连接（autostart 与手点竞态/旧标签残留）互相 reset/覆盖对方会话 → 空结果四连、上轮文本窜入下轮（曾实测"停口→ASR 0.00s"）；0.4.4 期间记录的"session 每次立即结束 result=''"即此根因，当时误判为豆包侧问题
+  - **豆包会话懒建连**：原在进入 listening 就建连，空闲 ~40s 被豆包远端掐流（`GrpcError: the stream is done`），此后整轮丢话；现 VAD start 事件才建连并补喂 pre-roll，feed 检测后台已死不再喂盲队列（PTT 模式保持进听即建连）
+  - **服务端单活跃连接**：新 WS 顶替旧连接（发应用层 `replaced`，不跨协程 close——那样客户端收 1006 分不清被顶替还是断线）；旧 Session 打回 idle，僵尸连接由 heartbeat 兜底清理
+  - **前端断线自愈**：connect 单飞防重入（双连接源头）；`wantLive` 意图标志 + 指数退避自动重连 + 重连后自动恢复 listening；息屏/切后台回前台（visibilitychange）立即补连；收到 `replaced` 主动退场不互踢。此前断线只改状态文字，麦克风还亮着但连接已死，即"只收音、不识别、不转指令"的直接体感
+- **语音 prompt 增加同音字容错**：提示 LLM 按律师语境纠正 ASR 同音字误差（如"转锁"→"转所"）
 - **asr_backend 分流错误**：`whispercpp`/`faster` 档此前会被 `!= "doubao"` 分支拦截、实际仍加载 sherpa；现仅 `auto`/`sherpa 才走 sherpa 流式，批量 ASR 配置真正生效
-- **doubao ASR 空结果**：实测 session 每次立即结束（result=''），暂弃用，配置切回 faster-whisper
+- **doubao ASR 空结果**：实测 session 每次立即结束（result=''），暂弃用，配置切回 faster-whisper（→ 根因已定位并修复，见上）
 
 ### Changed
 - **恢复流式朗读**：SSE 边生成边分句送 TTS，回退 0.4.3 的「等全量返回再统一入队」（保留禁 barge-in）；实测首句 3.74s / 首音 5.0s / 整轮播完 37.06s（高律师 2026-08-10 定）

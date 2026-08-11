@@ -9,6 +9,7 @@ const els = {
   btnToggle: document.getElementById('btnToggle'),
   btnInterrupt: document.getElementById('btnInterrupt'),
   btnNewSession: document.getElementById('btnNewSession'),
+  btnRestart: document.getElementById('btnRestart'),
   textIn: document.getElementById('textIn'),
   btnSend: document.getElementById('btnSend'),
   selVoice: document.getElementById('selVoice'),
@@ -119,6 +120,16 @@ function handleMessage(msg) {
       break;
     case 'tts_sentence':
       break; // 预留：逐句高亮
+    case 'replaced':
+      // 服务端单活跃连接：本页被新页面顶替，主动退场，不再自动重连
+      wantLive = false;
+      clearReconnect();
+      audio.stop();
+      if (ws) ws.close();
+      setStatus('已在其他页面打开，本页停止');
+      setState('idle');
+      els.btnToggle.textContent = '开始对话';
+      break;
     case 'error':
       addLine('error', msg.message);
       break;
@@ -130,17 +141,42 @@ const PAGE_PARAMS = new URLSearchParams(location.search);
 const SERVER = PAGE_PARAMS.get('server') || location.host;
 const TOKEN = PAGE_PARAMS.get('token') || '';
 
+// ---- 连接管理：单飞防重入 + 断线自愈 ----
+// wantLive = 用户意图“正在对话”。断线（息屏/切后台/隧道抖动）时麦克风还开着，
+// 老逻辑只改状态文字不重连——用户看着在收音，实际连接已死。现在意图在就自动重连恢复。
+
+let wantLive = false;
+let connectPromise = null;   // 单飞：autostart 与手点竞态曾各建一条 WS，两个服务端 Session 抢 ASR
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+
 function connect() {
-  return new Promise((resolve, reject) => {
+  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (connectPromise) return connectPromise;
+  connectPromise = new Promise((resolve, reject) => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${SERVER}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => { setStatus('已连接'); resolve(); };
     ws.onerror = (e) => reject(e);
-    ws.onclose = () => {
-      setStatus('连接断开');
+    ws.onclose = (e) => {
+      if (e.code === 4001) {
+        // 被新连接顶替（服务端单活跃连接）：本页退场，不与新页面互踢
+        wantLive = false;
+        clearReconnect();
+        audio.stop();
+        setStatus('已在其他页面打开，本页停止');
+        setState('idle');
+        els.btnToggle.textContent = '开始对话';
+        return;
+      }
       setState('idle');
-      els.btnToggle.textContent = '开始对话';
+      if (wantLive) {
+        scheduleReconnect();
+      } else {
+        setStatus('连接断开');
+        els.btnToggle.textContent = '开始对话';
+      }
     };
     ws.onmessage = (e) => {
       if (typeof e.data === 'string') {
@@ -153,11 +189,47 @@ function connect() {
         }
       }
     };
-  });
+  }).finally(() => { connectPromise = null; });
+  return connectPromise;
 }
 
+function clearReconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectDelay = 1000;
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || !wantLive) return;
+  setStatus(`连接断开，${Math.round(reconnectDelay / 1000)}s 后重连…`);
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!wantLive) return;
+    try {
+      await connect();
+      reconnectDelay = 1000;
+      pushConfig();
+      sendJson({ type: 'start' });   // 麦克风一直开着，恢复 listening 后帧自动续上
+      setStatus('已重连');
+    } catch {
+      reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+      scheduleReconnect();
+    }
+  }, reconnectDelay);
+}
+
+// 手机息屏/切后台时 iOS 会挂起网络，回前台立即检查补连（不等退避计时）
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wantLive
+      && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    clearReconnect();
+    scheduleReconnect();
+  }
+});
+
 async function toggle() {
-  if (audio.running) {
+  if (wantLive) {
+    wantLive = false;
+    clearReconnect();
     sendJson({ type: 'stop' });
     await audio.stop();
     els.btnToggle.textContent = '开始对话';
@@ -167,9 +239,10 @@ async function toggle() {
   els.btnToggle.disabled = true;
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) await connect();
-    await audio.start();          // 用户手势内：授权麦克风 + resume AudioContext
+    if (!audio.running) await audio.start();  // 用户手势内：授权麦克风 + resume AudioContext
     pushConfig();                 // 连接后立即同步当前语速/音色到服务端
     sendJson({ type: 'start' });
+    wantLive = true;
     els.btnToggle.textContent = '停止';
   } catch (err) {
     addLine('error', `启动失败：${err.message || err}`);
@@ -184,6 +257,34 @@ els.btnInterrupt.addEventListener('click', () => sendJson({ type: 'interrupt' })
 els.btnNewSession.addEventListener('click', () => {
   sendJson({ type: 'new_session' });
   els.transcript.innerHTML = '';
+});
+
+els.btnRestart.addEventListener('click', async () => {
+  if (!confirm('确定要重启服务吗？重启期间会短暂断开连接。')) return;
+  els.btnRestart.disabled = true;
+  els.btnRestart.textContent = '重启中...';
+  try {
+    const proto = location.protocol === 'https:' ? 'https' : 'http';
+    const url = `${proto}://${SERVER}/api/restart${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`;
+    await fetch(url, { method: 'POST' });
+    addLine('tool', '✓ 服务重启中，3秒后自动重连...');
+    // 关闭当前连接
+    if (ws) ws.close();
+    ws = null;
+    // 4秒后重连（给服务2秒退出+2秒启动的时间）
+    setTimeout(() => {
+      connect()
+        .then(() => addLine('tool', '✓ 重连成功'))
+        .catch(() => addLine('error', '重连失败，请手动刷新页面'));
+    }, 4000);
+  } catch (err) {
+    addLine('error', `重启失败：${err.message || err}`);
+  } finally {
+    setTimeout(() => {
+      els.btnRestart.disabled = false;
+      els.btnRestart.textContent = '重启服务';
+    }, 6000);
+  }
 });
 
 function sendText() {
@@ -207,10 +308,11 @@ els.textIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendText(
   if (PAGE_PARAMS.get('autostart') === '0') return;
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) await connect();
-    await audio.start();
+    if (!audio.running) await audio.start();
     sendJson({ type: 'start' });
+    wantLive = true;
     els.btnToggle.textContent = '停止';
-  } catch { /* 无授权或自动播放受限：保持手动模式 */ }
+  } catch { /* 无授权或自动播放受限：保持手动模式（连接留用，手点时复用同一条） */ }
 })();
 
 function pushConfig() {

@@ -99,28 +99,38 @@ class Session:
 
     # ---------- 入站 ----------
 
+    def _send_partial(self, partial: str) -> None:
+        if partial and partial != self._last_partial:
+            self._last_partial = partial
+            self.send_json("asr_partial", text=partial)
+
     async def on_audio(self, pcm: bytes) -> None:
         if len(pcm) != FRAME_BYTES:
             return
         if self.state == "listening":
             if time.monotonic() < self.listen_ignore_until:
                 return
-            # 流式 ASR：逐帧喂，中间结果推给前端实时显示
-            if self.doubao_asr is not None:
-                partial = self.doubao_asr.feed(pcm)
-                if partial and partial != self._last_partial:
-                    self._last_partial = partial
-                    self.send_json("asr_partial", text=partial)
-            elif self.asr_stream is not None:
-                partial = self.asr_stream.feed(pcm)
-                if partial and partial != self._last_partial:
-                    self._last_partial = partial
-                    self.send_json("asr_partial", text=partial)
+            # sherpa 流式：本地模型，静音期逐帧喂着无害，中间结果实时显示
+            if self.doubao_asr is None and self.asr_stream is not None:
+                self._send_partial(self.asr_stream.feed(pcm))
             if self.ptt:
-                # PTT：不跑 VAD 分段，攒帧等 utterance_end 显式收口
+                # PTT：不跑 VAD 分段，攒帧等 utterance_end 显式收口；
+                # doubao 会话已在 _enter_listening 建好（按住即说，不会闲置挂连）
+                if self.doubao_asr is not None:
+                    self._send_partial(self.doubao_asr.feed(pcm))
                 self._ptt_buf.append(pcm)
                 return
             ev = self.segmenter.feed(pcm)
+            if self.doubao_asr is not None:
+                # 懒建连：真正说话（VAD start）才开豆包会话——闲置挂连约 40s
+                # 会被豆包远端掐流（GrpcError: the stream is done），此后整轮丢话
+                if ev and ev[0] == "start":
+                    self.doubao_asr.reset()
+                    self.doubao_asr.start_turn()
+                    for f in self.segmenter.buf:   # pre-roll + 触发帧一次性补喂
+                        self.doubao_asr.feed(f)
+                elif self.segmenter.in_speech:
+                    self._send_partial(self.doubao_asr.feed(pcm))
             if ev and ev[0] == "end" and ev[1]:
                 # doubao：VAD end 时已有足量帧，finish() 在 _run_turn 里等最终结果
                 if self.doubao_asr is not None:
@@ -200,6 +210,8 @@ class Session:
     async def close(self) -> None:
         self.closed = True
         await self._cancel_turn()
+        if self.doubao_asr is not None:
+            self.doubao_asr.reset()   # cancel 在途豆包会话任务，防连接关闭后泄漏
 
     # ---------- 状态迁移 ----------
 
@@ -209,7 +221,10 @@ class Session:
         self._ptt_buf = []
         if self.doubao_asr is not None:
             self.doubao_asr.reset()
-            self.doubao_asr.start_turn()   # 提前建连，VAD 触发前就准备好 WS 会话
+            if self.ptt:
+                # PTT 无 VAD start 事件，只能进监听时建连（按住才录，不会闲置挂连）；
+                # VAD 模式懒建连，见 on_audio 的 "start" 分支
+                self.doubao_asr.start_turn()
         if self.asr_stream is not None:
             self.asr_stream.reset()
         if echo_guard:

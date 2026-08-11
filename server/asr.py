@@ -122,27 +122,32 @@ class DoubaoStreamingASR:
             return False
 
     def start_turn(self) -> None:
-        """开始新话轮：初始化队列，启动后台 WebSocket 任务。"""
+        """开始新话轮：初始化队列，启动后台 WebSocket 任务。
+
+        队列/future 以局部变量捕获进 task 闭包——旧 task 迟到的结果只会写进
+        自己那轮的 future，不会窜进下一轮（曾实发：上轮识别文本被下轮当作
+        ASR 结果，停口→ASR 0.00s）。
+        """
         if not self._available:
             return
         loop = asyncio.get_event_loop()
         self._loop = loop
-        self._pcm_queue = asyncio.Queue()
-        self._result_future = loop.create_future()
+        queue: asyncio.Queue = asyncio.Queue()
+        future: asyncio.Future = loop.create_future()
+        self._pcm_queue = queue
+        self._result_future = future
         self._partial = ""
         logger.info("doubao start_turn: launching background session task")
-        self._task = loop.create_task(self._run_session())
+        self._task = loop.create_task(self._run_session(queue, future))
 
-    async def _run_session(self) -> None:
-        from doubaoime_asr import ASRConfig
-        from doubaoime_asr.asr import ResponseType
+    async def _run_session(self, queue: asyncio.Queue, future: asyncio.Future) -> None:
         from doubaoime_asr import transcribe_realtime
 
         logger.info("doubao session starting...")
 
         async def pcm_gen():
             while True:
-                chunk = await self._pcm_queue.get()
+                chunk = await queue.get()
                 if chunk is None:
                     logger.debug("doubao pcm_gen: got None, ending stream")
                     return
@@ -150,7 +155,6 @@ class DoubaoStreamingASR:
 
         final_text = ""
         try:
-            logger.info("doubao transcribe_realtime() starting...")
             async for resp in transcribe_realtime(pcm_gen(), config=self._config):
                 if resp.type.name == "INTERIM_RESULT":
                     self._partial = resp.text
@@ -164,14 +168,19 @@ class DoubaoStreamingASR:
         except Exception as e:
             logger.warning("doubao ASR 会话异常：%s", e, exc_info=True)
         finally:
-            if self._result_future and not self._result_future.done():
-                self._result_future.set_result(final_text)
+            if not future.done():
+                future.set_result(final_text)
             logger.info("doubao session ended, result=%r", final_text[:80] if final_text else "")
 
     def feed(self, pcm16: bytes) -> str:
         """喂一帧 PCM16（1024 字节）。返回当前中间文本（可能为空）。"""
         if not self._available or self._pcm_queue is None:
             return ""
+        if self._task is not None and self._task.done():
+            # 远端掐流/异常后台已死（如 40s 无语音被服务端断开）：本轮作废，
+            # 由 finish() 取已落定的结果，调用方 reset 后下一轮重建会话。
+            logger.warning("doubao feed: 后台会话已结束，丢弃本帧")
+            return self._partial
         self._pcm_queue.put_nowait(pcm16)
         return self._partial
 
