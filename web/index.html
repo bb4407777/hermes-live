@@ -12,6 +12,9 @@
     --bg: #0d1117; --panel: #161b22; --line: #21262d;
     --fg: #e6edf3; --dim: #8b949e; --user: #1f6feb; --err: #f85149;
     --orb1: #58a6ff; --orb2: #bc8cff;
+    /* 状态色：可接收语音=蓝，工作中(思考/播报)=紫红 */
+    --blue1: #58a6ff; --blue2: #1f6feb;
+    --mag1: #d977ff; --mag2: #bc5cff;
   }
   * { box-sizing: border-box; }
   body {
@@ -45,13 +48,13 @@
   #stage { display: flex; flex-direction: column; align-items: center; padding: 20px 0 8px; flex-shrink: 0; }
   #orb {
     width: 110px; height: 110px; border-radius: 50%;
-    background: radial-gradient(circle at 32% 30%, var(--orb1), var(--orb2) 75%);
+    background: radial-gradient(circle at 32% 30%, var(--mag1), var(--mag2) 75%);
     filter: saturate(.4) brightness(.55); transition: filter .3s, transform .12s;
     cursor: pointer;
   }
-  #orb.listening { filter: none; box-shadow: 0 0 42px #58a6ff55; }
-  #orb.thinking  { filter: hue-rotate(40deg); animation: breathe 1.4s ease-in-out infinite; }
-  #orb.speaking  { filter: hue-rotate(-25deg); animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 52px #bc8cff66; }
+  #orb.listening { background: radial-gradient(circle at 32% 30%, var(--blue1), var(--blue2) 75%); filter: none; box-shadow: 0 0 42px #58a6ff55; }
+  #orb.thinking  { filter: none; animation: breathe 1.4s ease-in-out infinite; }
+  #orb.speaking  { filter: none; animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 52px #bc8cff66; }
   @keyframes breathe { 50% { transform: scale(1.08); } }
   #stateLabel { margin-top: 12px; color: var(--dim); font-size: 13px; min-height: 20px; }
   #partialText {

@@ -34,12 +34,12 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .orb-wrap  { width: 160rpx; height: 160rpx; display: flex; align-items: center; justify-content: center; }
 .orb {
   width: 140rpx; height: 140rpx; border-radius: 50%;
-  background: radial-gradient(circle at 32% 30%, #58a6ff, #bc8cff 75%);
+  background: radial-gradient(circle at 32% 30%, #d977ff, #bc5cff 75%);
   filter: saturate(.35) brightness(.5); transition: filter .3s;
 }
-.orb.listening { filter: none; box-shadow: 0 0 60rpx #58a6ff55; }
-.orb.thinking  { filter: hue-rotate(40deg); animation: breathe 1.4s ease-in-out infinite; }
-.orb.speaking  { filter: hue-rotate(-25deg); animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
+.orb.listening { background: radial-gradient(circle at 32% 30%, #58a6ff, #1f6feb 75%); filter: none; box-shadow: 0 0 60rpx #58a6ff55; }
+.orb.thinking  { filter: none; animation: breathe 1.4s ease-in-out infinite; }
+.orb.speaking  { filter: none; animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
 @keyframes breathe { 50% { transform: scale(1.08); } }
 .orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
 
