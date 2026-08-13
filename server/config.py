@@ -90,6 +90,10 @@ class Config:
     # 面板是否显示 Hermes 的工具执行过程（如"上班打卡"式 ls——高律师 2026-08-08 定默认不看）
     show_tool_progress: bool = False
 
+    # 工具执行间隙缓冲语音：模型跑工具（查目录/读文件）时不出 delta，语音断档。
+    # 若本 turn 尚未出声，在首个工具事件时插一句缓冲句，让用户知道还在干活。
+    tool_buffer_text: str = "稍等，我查一下。"   # 置空字符串 = 关闭该功能
+
     extra: dict = field(default_factory=dict)
 
 

@@ -312,6 +312,11 @@ class Session:
                         self.send_json("tool_progress", turn=t,
                                        tool=tool.get("tool"), label=tool.get("label"),
                                        emoji=tool.get("emoji"), status=tool.get("status"))
+                    # 工具间隙缓冲语音：模型跑工具时不出 delta，若本 turn 还没开过口，
+                    # 插一句缓冲句，避免语音断档显得卡（高律师 2026-08-13 定）
+                    if self.cfg.tool_buffer_text and m.first_audio is None:
+                        m.mark("first_sentence")
+                        queue.put_nowait(self.cfg.tool_buffer_text)
                 elif ev.kind == "done":
                     finish_reason = ev.finish_reason
             for s in assembler.flush():
