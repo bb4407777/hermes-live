@@ -52,7 +52,15 @@ class Config:
     barge_preroll_ms: int = 500
 
     # ASR
-    asr_backend: str = "auto"           # auto | doubao | sherpa | whispercpp | faster
+    asr_backend: str = "auto"           # auto | qwen | doubao | sherpa | whispercpp | faster
+    # qwen3-asr 本地 sidecar（复用 weSaw 的 venv/脚本/权重；批量转写，无实时字幕）
+    asr_qwen_python: str = "~/Code/weSaw/scripts/.venv-qwenasr/bin/python"
+    asr_qwen_server: str = "~/Code/weSaw/scripts/qwenasr_server.py"
+    asr_qwen_model: str = "~/.cache/models/Qwen3-ASR-1.7B"
+    asr_qwen_timeout: float = 300.0        # 单条转写超时（秒）
+    asr_qwen_start_timeout: float = 300.0  # sidecar 加载模型+预热超时（秒）
+    asr_qwen_warm_at_boot: bool = True     # 服务启动即后台预热 sidecar（否则首次说话要等加载）
+    asr_qwen_idle_kill_min: float = 0.0    # 空闲多久回收 sidecar（0=常驻；回收后下次调用重新加载）
     # doubaoime 豆包逆向云端 ASR（优先级最高；需联网；依赖 doubaoime-asr 包）
     asr_doubao_credential_path: str = str(Path.home() / ".config/doubao-asr/credentials.json")
     # sherpa-onnx 流式 paraformer（优先；模型与 expression-trainer 共用，无需另行下载）

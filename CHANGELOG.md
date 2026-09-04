@@ -15,6 +15,9 @@
 
 ## [Unreleased]
 
+### Added
+- **ASR 切换 qwen3-asr 本地 sidecar**（2026-09-04 高律师定）：`asr_backend: qwen`——复用 weSaw 的 `scripts/qwenasr_server.py` + 专用 venv `.venv-qwenasr` + 权重 `~/.cache/models/Qwen3-ASR-1.7B`（4.4GB，MPS），新增 `server/qwen_asr.py` 常驻 sidecar 客户端（stdin/stdout JSON 行协议；服务启动后台预热，实测 ~16s ready；崩溃惰性重启；服务退出关 stdin 由 sidecar 读 EOF 自杀，不留孤儿；`asr_qwen_idle_kill_min` 可选空闲回收）。实测 4.5s 语音热转写 1.31s（RTF≈0.29，快于 whisper.cpp 0.47），断句标点更好，离线免豆包逆向依赖。**代价：批量模型无 asr_partial 实时字幕**，asr_final 一次到位；`auto` 档现在也优先 qwen（doubao 退居次选）
+
 ### Changed
 - **launchd 常驻**（高律师 2026-08-11 定）：`com.gaochengbin.hermes-live` KeepAlive 常驻，Mac 重启/进程崩溃自动拉起（实测 kill -9 后 ~10s 复活）；plist 模板入仓 `scripts/launchd/`；`restart-service.sh` 自动识别 launchd 走 `kickstart -k`（否则 KeepAlive 拉起 + 脚本 nohup 再起一个会双进程），网页/小程序重启按钮同路径，实测重启后单进程
 - **尾静音 800→1100ms**（高律师 2026-08-11 定）：800ms 时思考停顿（"那个…"）被切碎单独成轮，调回 1100 换少切碎，每轮多等 0.3s

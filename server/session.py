@@ -21,6 +21,7 @@ from .asr import ASR, SherpaStreamingASR, DoubaoStreamingASR
 from .config import Config
 from .hermes_client import HermesClient
 from .metrics import TurnMetrics
+from .qwen_asr import QwenSidecarASR
 from .sentencer import SentenceAssembler
 from .tts import TTSEngine
 from .vad import BargeDetector, Segmenter, new_vad
@@ -37,11 +38,13 @@ class Session:
     def __init__(self, cfg: Config, asr: ASR, tts: TTSEngine, hermes: HermesClient,
                  outbox: asyncio.Queue,
                  asr_stream: SherpaStreamingASR | None = None,
-                 doubao_asr: DoubaoStreamingASR | None = None):
+                 doubao_asr: DoubaoStreamingASR | None = None,
+                 qwen_asr: QwenSidecarASR | None = None):
         self.cfg = cfg
         self.asr = asr
         self.asr_stream = asr_stream   # 流式后端（sherpa）；None 时回退 batch ASR
         self.doubao_asr = doubao_asr   # 豆包云端流式；优先级最高
+        self.qwen_asr = qwen_asr       # qwen3-asr 本地 sidecar 批量（weSaw 同款）
         self.tts = tts
         self.hermes = hermes
         self.outbox = outbox  # ("json", str) | ("bin", bytes)，由 ws 写协程串行发送
@@ -274,6 +277,10 @@ class Session:
                     # sherpa 流式路径：VAD 触发时累积结果已就位，get_result() ≈ 0 延迟
                     text = self.asr_stream.get_result()
                     self.asr_stream.reset()
+                elif self.qwen_asr is not None and self.qwen_asr.available:
+                    # qwen3-asr 批量路径：整段转写（无实时字幕）；sidecar 是 MPS 推理进程，
+                    # to_thread 包裹防阻塞事件循环
+                    text = await asyncio.to_thread(self.qwen_asr.transcribe, pcm_utt)
                 else:
                     # 批量兜底：约 1s 转写延迟
                     text = await asyncio.to_thread(self.asr.transcribe, pcm_utt)

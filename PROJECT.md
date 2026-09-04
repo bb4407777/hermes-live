@@ -19,8 +19,9 @@
     ↓ WebSocket (ws://127.0.0.1:8698)
 服务端 (server/main.py)
     ├─ silero VAD 分段 (server/vad.py)
-    ├─ ASR 转写 (server/asr.py)
-    │   ├─ doubaoime-asr（云端，优先）
+    ├─ ASR 转写 (server/asr.py + server/qwen_asr.py)
+    │   ├─ qwen3-asr sidecar（本地批量，复用 weSaw venv/权重，优先，无实时字幕）
+    │   ├─ doubaoime-asr（云端流式，次选）
     │   ├─ sherpa-onnx（本地流式，备胎）
     │   └─ pywhispercpp（本地批处理，兜底）
     ├─ Hermes gateway 对话 (8647 /v1/chat/completions)
@@ -35,7 +36,8 @@
 |------|------|------|
 | 主服务 | `server/main.py` | WebSocket 服务、状态机、协议处理 |
 | VAD | `server/vad.py` | silero 语音活动检测、分段 |
-| ASR | `server/asr.py` | 三档语音识别（doubao/sherpa/whisper） |
+| ASR | `server/asr.py` | 多档语音识别（qwen/doubao/sherpa/whisper） |
+| qwen sidecar | `server/qwen_asr.py` | Qwen3-ASR 本地 sidecar 客户端（复用 weSaw venv/权重，MPS 批量转写） |
 | TTS | `server/tts.py` | edge-tts 合成、备胎接口 |
 | 分句器 | `server/sentencer.py` | 中文分句、首句加速、markdown 清洗 |
 | 配置 | `server/config.py` | 集中配置、环境变量覆盖 |
@@ -107,10 +109,12 @@ idle ─────────────> listening ────────
 
 ### 3. iOS App（`ios/`）
 
-- **技术栈**：Swift + WebView 托管网页版
-- **签名**：免费个人签名
-- **工程**：`ios/HermesLive.xcodeproj`
-- **状态**：可用，但小程序更方便，优先推荐小程序
+- **技术栈**：SwiftUI + AVAudioEngine 原生录音/播放（2026-08-14 起弃用 WKWebView 壳）
+  - 采集：input tap → AVAudioConverter 16k PCM16，512 样本/帧（对齐 mic-processor.js）
+  - 播放：AVAudioPlayerNode 24k PCM16，turn 过滤 + tts_end 排空后报 playback_done
+  - 后台：`UIBackgroundModes=audio`，锁屏/切后台对话不断（WebView 壳做不到）
+- **签名**：免费个人签名（7 天有效期）
+- **工程**：`ios/HermesLive.xcodeproj`（`xcodegen generate` 由 `project.yml` 生成）
 
 ### 4. Tailscale 远程访问
 

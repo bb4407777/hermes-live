@@ -22,6 +22,7 @@ from .asr import ASR, SherpaStreamingASR, DoubaoStreamingASR
 from .config import PROJECT_ROOT, load_config
 from .hermes_client import HermesClient
 from .protocol import unpack_audio_up
+from .qwen_asr import QwenSidecarASR
 from .session import Session
 from .tts import TTSEngine
 
@@ -109,7 +110,8 @@ async def handle_health(request: web.Request) -> web.Response:
         "ok": True,
         "hermes": await hermes.health(),
         "asr_model": (
-            "doubao" if request.app.get("doubao_asr") and request.app["doubao_asr"].available
+            "qwen3-asr-1.7b" if request.app.get("qwen_asr") and request.app["qwen_asr"].available
+            else "doubao" if request.app.get("doubao_asr") and request.app["doubao_asr"].available
             else "sherpa-paraformer" if request.app.get("asr_stream") and request.app["asr_stream"].available
             else request.app["cfg"].asr_model
         ),
@@ -196,7 +198,8 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
         doubao.load()
     session = Session(app["cfg"], app["asr"], app["tts"], app["hermes"], outbox,
                       asr_stream=app.get("asr_stream"),
-                      doubao_asr=doubao)
+                      doubao_asr=doubao,
+                      qwen_asr=app.get("qwen_asr"))
     live["session"] = session
     writer = asyncio.create_task(ws_writer(ws, outbox))
     session.send_json("hello", session_id=app["hermes"].session_id,
@@ -236,6 +239,7 @@ def build_app(cfg, preload: bool = True) -> web.Application:
     app["asr"] = ASR(cfg)
     app["asr_stream"] = SherpaStreamingASR(cfg)
     app["doubao_asr"] = DoubaoStreamingASR(cfg)
+    app["qwen_asr"] = QwenSidecarASR(cfg)
     app["tts"] = TTSEngine(cfg)
 
     async def on_startup(app: web.Application) -> None:
@@ -244,8 +248,15 @@ def build_app(cfg, preload: bool = True) -> web.Application:
         if preload:
             # TTS：kokoro 优先，edge-tts 兜底
             app["tts"].load()
-            # 优先豆包云端（联网，中文极准）；失败则 sherpa；再失败则批量 ASR
-            if cfg.asr_backend in ("auto", "doubao") and app["doubao_asr"].load():
+            # ASR 优先链：qwen3-asr 本地 sidecar（离线、weSaw 同款）> 豆包云端 > sherpa > 批量
+            if cfg.asr_backend in ("auto", "qwen") and app["qwen_asr"].load():
+                logger.info("ASR: qwen3-asr sidecar（本地批量，无实时字幕）")
+                app["asr_stream"] = None
+                app["doubao_asr"] = None
+                if cfg.asr_qwen_warm_at_boot:
+                    # 后台预热，不阻塞服务启动；ready 前说话会等到模型加载完
+                    asyncio.create_task(app["qwen_asr"].ensure_started())
+            elif cfg.asr_backend in ("auto", "doubao") and app["doubao_asr"].load():
                 logger.info("ASR: doubaoime（豆包云端流式）ready")
                 app["asr_stream"] = None  # doubao 优先，sherpa 不再加载
             elif cfg.asr_backend in ("auto", "sherpa") and app["asr_stream"].load():
@@ -264,6 +275,7 @@ def build_app(cfg, preload: bool = True) -> web.Application:
 
     async def on_cleanup(app: web.Application) -> None:
         await app["http"].close()
+        app["qwen_asr"].shutdown()   # 结束 sidecar，防 launchd 重启窗口期双模型驻留
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
