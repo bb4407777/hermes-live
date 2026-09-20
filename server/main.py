@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import functools
+import hmac
 import json
 import logging
 import time
@@ -17,7 +19,9 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from aiohttp.web_log import AccessLogger, KeyMethod
 
+from . import __version__
 from .asr import ASR, SherpaStreamingASR, DoubaoStreamingASR
 from .config import PROJECT_ROOT, load_config
 from .hermes_client import HermesClient
@@ -30,8 +34,49 @@ logger = logging.getLogger("hermes-live")
 WEB_DIR = PROJECT_ROOT / "web"
 
 
+class TokenMaskingAccessLogger(AccessLogger):
+    """访问日志里遮掉 auth_token。
+
+    默认 LOG_FORMAT 的 %r（请求行）和 %{Referer}i 都会带上 ?token=…，
+    实测已把明文 token 写进 logs/service.log；这里包住父类编译出的每个
+    取值函数，对结果做替换（_format_* 是绑到 AccessLogger 上的 staticmethod，
+    覆写它们不生效，只能包 _methods）。
+    """
+
+    def __init__(self, logger, log_format):
+        super().__init__(logger, log_format)
+        self._methods = [KeyMethod(k, functools.partial(self._masked, fn))
+                         for k, fn in self._methods]
+
+    def _masked(self, fn, *args):
+        text = fn(*args)
+        request = args[0]
+        # %s/%b 这类取值函数返回 int，直接 `token in text` 会抛 TypeError；
+        # 而 AccessLogger.log 整个包在 try/except 里 —— 一旦抛异常这行日志被静默丢弃，
+        # 等于把访问日志全关了。
+        if not isinstance(text, str) or request is None:
+            return text
+        cfg = request.app.get("cfg")
+        token = getattr(cfg, "auth_token", "") if cfg is not None else ""
+        return text.replace(token, "***") if token and token in text else text
+
+
 async def handle_index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB_DIR / "index.html")
+
+
+@web.middleware
+async def no_cache_assets(request: web.Request, handler) -> web.StreamResponse:
+    """前端三个 JS 互相依赖（app.js → audio.js → worklet），版本错配会整场静音：
+    0.4.6 的 app.js 不发 offset，新的 player-processor 于是把每块音频解成 0 个样本，
+    而麦克风与 ASR 一切正常，页面看不出任何异常（2026-09-20 线上「没有声音」即此）。
+    aiohttp 的静态只发 ETag 不发 Cache-Control，Safari/Chrome 便按「距 Last-Modified
+    的约 10%」各自启发式缓存 → 刷新后半新半旧。no-cache 强制每次带 ETag 回源校验，
+    没变就是 304 几百字节，代价可忽略。"""
+    resp = await handler(request)
+    if request.path == "/" or request.path.startswith("/web/"):
+        resp.headers.setdefault("Cache-Control", "no-cache")
+    return resp
 
 
 UPLOAD_MAX = 200 * 1024 * 1024  # 与 areco 同款 200MB 上限
@@ -58,8 +103,10 @@ def _check_token(request: web.Request) -> None:
     cfg = request.app["cfg"]
     if not cfg.auth_token:
         return
-    if (request.query.get("token") == cfg.auth_token
-            or request.headers.get("Authorization") == f"Bearer {cfg.auth_token}"):
+    auth = request.headers.get("Authorization", "")
+    supplied = request.query.get("token") or (
+        auth[len("Bearer "):] if auth.startswith("Bearer ") else "")
+    if supplied and hmac.compare_digest(supplied, cfg.auth_token):
         return
     raise web.HTTPUnauthorized(text="bad token")
 
@@ -108,15 +155,17 @@ async def handle_health(request: web.Request) -> web.Response:
     hermes: HermesClient = request.app["hermes"]
     return web.json_response({
         "ok": True,
+        "version": __version__,
         "hermes": await hermes.health(),
+        "auth_required": bool(request.app["cfg"].auth_token),
         "asr_model": (
             "qwen3-asr-1.7b" if request.app.get("qwen_asr") and request.app["qwen_asr"].available
             else "doubao" if request.app.get("doubao_asr") and request.app["doubao_asr"].available
             else "sherpa-paraformer" if request.app.get("asr_stream") and request.app["asr_stream"].available
-            else request.app["cfg"].asr_model
+            else request.app["asr"].backend_label or request.app["cfg"].asr_model
         ),
         "voice": request.app["cfg"].tts_voice,
-        "session_id": hermes.session_id,
+        # 不回显 session_id：这个端点不鉴权，会话标识属于外部可读信息
     })
 
 
@@ -158,17 +207,29 @@ async def handle_restart(request: web.Request) -> web.Response:
         )
 
 
-async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue) -> None:
-    """唯一写者：保证多任务出站消息不交错。"""
+async def ws_writer(ws: web.WebSocketResponse, outbox: asyncio.Queue,
+                    session: Session | None = None) -> None:
+    """唯一写者：保证多任务出站消息不交错。
+
+    发送失败（隧道抽风/手机息屏半开）时不能只让协程死掉：Session 还在往无界
+    outbox 里塞音频帧，turn 协程也会一直卡在等永不再来的 playback_done。
+    所以失败要回告 Session：停止出站 + 打断在途 turn。
+    """
     while True:
         item = await outbox.get()
         if item is None:
             return
         kind, payload = item
-        if kind == "json":
-            await ws.send_str(payload)
-        else:
-            await ws.send_bytes(payload)
+        try:
+            if kind == "json":
+                await ws.send_str(payload)
+            else:
+                await ws.send_bytes(payload)
+        except Exception as exc:
+            logger.warning("ws 出站失败，停止发送：%s: %s", type(exc).__name__, exc)
+            if session is not None:
+                session.on_conn_lost()
+            return
 
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
@@ -201,9 +262,9 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
                       doubao_asr=doubao,
                       qwen_asr=app.get("qwen_asr"))
     live["session"] = session
-    writer = asyncio.create_task(ws_writer(ws, outbox))
+    writer = asyncio.create_task(ws_writer(ws, outbox, session))
     session.send_json("hello", session_id=app["hermes"].session_id,
-                      voice=app["cfg"].tts_voice, asr_model=app["cfg"].asr_model)
+                      voice=app["cfg"].tts_voice, asr_model=session.asr_label())
     logger.info("ws connected")
     try:
         async for msg in ws:
@@ -233,7 +294,7 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
 
 
 def build_app(cfg, preload: bool = True) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_assets])
     app["cfg"] = cfg
     app["live_state"] = {"session": None}   # 当前活跃 WS 的 Session（单活跃连接）
     app["asr"] = ASR(cfg)
@@ -263,7 +324,7 @@ def build_app(cfg, preload: bool = True) -> web.Application:
                 logger.info("ASR: streaming sherpa-onnx ready")
                 app["doubao_asr"] = None
             else:
-                logger.info("sherpa-onnx 不可用，加载批量 ASR ...")
+                logger.info("无流式 ASR 可用（asr_backend=%s），加载批量兜底 ...", cfg.asr_backend)
                 app["asr_stream"] = None
                 app["doubao_asr"] = None
                 await asyncio.to_thread(app["asr"].load)
@@ -303,8 +364,9 @@ def main() -> None:
     if args.port:
         cfg.port = args.port
     app = build_app(cfg, preload=not args.no_preload)
-    logger.info("Hermes-live → http://%s:%s", cfg.host, cfg.port)
-    web.run_app(app, host=cfg.host, port=cfg.port, print=None)
+    logger.info("Hermes-live v%s → http://%s:%s", __version__, cfg.host, cfg.port)
+    web.run_app(app, host=cfg.host, port=cfg.port, print=None,
+                access_log_class=TokenMaskingAccessLogger)
 
 
 if __name__ == "__main__":

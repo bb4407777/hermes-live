@@ -1,11 +1,20 @@
 # 复制为 config.yaml 按需覆盖（config.yaml 已 gitignore）。全部键见 server/config.py。
+# 行末为 server/config.py 的默认值；「线上」注的是 2026-09-19 核对的真实 config.yaml。
 
+# host: 127.0.0.1          # ▸线上 0.0.0.0（手机/隧道接入要监听全网卡，此时 auth_token 必须非空）
 # port: 8698
-# asr_backend: whispercpp     # 当前推荐：本地 whisper.cpp Metal；doubao 已废弃（空结果）
-# asr_model: small            # 省内存档（默认 large-v3-turbo，约多占 1GB）
-# tts_backend: auto           # auto=kokoro 优先，edge-tts 兜底；kokoro=强制本地；edge=强制云端
+# auth_token: ""           # 非空时 /ws 与 /api/restart 必须带 token（?token= 或 Authorization: Bearer）
+                           # 只准写在这份 gitignored 文件里；0.4.7 起访问日志自动遮成 token=***
+# asr_backend: auto        # auto=按优先链探测：qwen 本地 sidecar > doubao 云端 > sherpa 流式 > whisper 批量
+                           # 也可钉档：qwen | doubao | sherpa | whispercpp | faster   ▸线上 doubao
+                           #（doubao 曾"空结果"，根因是 app 级单例被多连接互踩，0.4.6 已修）
+# asr_model: large-v3-turbo  # 省内存可降 small；qwen 档走 sidecar 的固定权重
+# tts_backend: auto        # auto=kokoro 本地优先、edge-tts 云端兜底；kokoro=强制本地；edge=强制云端   ▸线上 edge
 # tts_voice: zh-CN-YunxiNeural  # edge-tts 男声；默认 zh-CN-XiaoxiaoNeural
-# kokoro_voice: zf_001        # kokoro 音色（zf_001=普通话女声）
-# tts_rate: "+8%"             # edge-tts 语速；kokoro 用 kokoro_speed
-# vad_end_silence_ms: 800     # 默认 800（原 1200）；想更快接话可降到 500，误切升高
+# kokoro_voice: zf_001     # kokoro 音色（zf_001=普通话女声）
+# tts_rate: "+8%"          # edge-tts 语速；kokoro 用 kokoro_speed
+# tts_lookahead: 2         # TTS 预合成句数。1 时上一句播完下一句还没合成 → 句间断流卡顿
+# playback_grace_ms: 900   # 等客户端 playback_done 的余量（客户端预灌水位 120ms + 网络抖动）
+# vad_threshold: 0.5       # listening 档语音概率阈值（barge_* 在半双工下不参与决策，先别调）
+# vad_end_silence_ms: 1100 # 尾静音判段结束。800 会把"那个…"这类思考停顿切成单独一轮（2026-08-11 定 1100）
 # voice_system_prompt: 自定义语音风格提示……

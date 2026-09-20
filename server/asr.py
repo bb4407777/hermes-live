@@ -1,17 +1,32 @@
-"""ASR 后端：doubaoime（豆包逆向，云端流式）> sherpa-onnx 流式 > whisper 批量兜底。
+"""ASR 后端：qwen 本地 sidecar > 豆包云端 > sherpa 流式 > whisper 批量兜底。
+（当前线上钉在 doubao：2026-09-10 高律师定，本机内存不够，弃用 qwen 大权重。）
 
 backend 实测（M1 Pro，2.9s 中文测试音频，2026-08-09）：
   doubaoime（豆包输入法 WebSocket）        —— 云端，中文极准，实时中间结果，RTF 受网络影响
   sherpa-onnx streaming paraformer (CPU)  —— RTF≈0.05，边说边出字，VAD 触发即取结果（≈0延迟）
   whispercpp (turbo q5_0, Metal)          —— RTF≈0.35，一次性转写，VAD 后额外等 1s
   faster-whisper large-v3-turbo int8      —— RTF≈1.2，太慢，仅最终兜底
+  2026-09-19 补充见 PROJECT.md「实测记录」：qwen3-asr 1.7B 热转写 RTF≈0.29；
+  doubao 停口→ASR 0.2~4.2s（首轮建连慢），并两次整段返回空文本 → 用户侧「说完没反应」。
 
-架构：
+架构（优先级在 server/main.py 的启动探测里落地）：
+  QwenSidecarASR (server/qwen_asr.py) —— 批量：独立 MPS sidecar 进程复用 weSaw 权重，无实时字幕。
   DoubaoStreamingASR  —— 流式；每话轮建一个 WebSocket，逐帧喂 PCM，服务端返回中间/最终结果。
                           VAD 触发 end 时调 finish() 拿最终文本。需网络，凭据自动注册缓存。
   SherpaStreamingASR  —— 流式；由 Session.on_audio 在 listening 态逐帧 feed；
                           VAD 触发 end 时调 get_result()（同步，近似零等待）。
-  ASR                 —— 批量；仅 --text CLI 路径或 sherpa 不可用时使用。
+  ASR                 —— 批量兜底（whisper.cpp Metal 优先，faster-whisper 最后）。Session._run_turn
+                          只有在 doubao/sherpa/qwen 三档都没就位时才调它（self.asr.transcribe 分支）；
+                          cli.m0_pipeline 的 --wav/--mic 只传批量 asr、不传流式后端，无条件走这里——
+                          2026-09-19 冒烟卡 7 分钟就是从这条路径暴露的（见 CHANGELOG 0.4.7）。
+
+asr_backend 档位：auto | qwen | doubao | sherpa | whispercpp | faster
+  auto   —— 按上面的链探测
+  qwen / doubao / sherpa —— 钉某一档；该档 load 失败则落到批量兜底
+  whispercpp / faster    —— 不选流式档，直接批量兜底（内部靠 asr_ggml_model / asr_model 区分）
+两个次序不一样、别记混：启动探测是 qwen > doubao > sherpa（main.py，选中的留下、其余置 None），
+话轮里取用是 doubao > sherpa > qwen > 批量（Session._run_turn）。因为探测只会留一个，
+实际不冲突；回显给客户端的档位统一走 Session.asr_label()，别再用 cfg.asr_model。
 """
 
 from __future__ import annotations
@@ -313,14 +328,15 @@ class SherpaStreamingASR:
 
 
 # ---------------------------------------------------------------------------
-# 批量 ASR（whisper.cpp / faster-whisper，sherpa 不可用时兜底）
+# 批量 ASR（whisper.cpp 优先 / faster-whisper 最后，qwen·豆包·sherpa 都不可用时兜底）
 # ---------------------------------------------------------------------------
 
 class ASR:
     """批量转写后端（whisper.cpp Metal 或 faster-whisper）。
 
-    用于：① sherpa 不可用时兜底；② --text CLI 路径（text=None 时不会走这里）。
-    调用方用 asyncio.to_thread 包裹（GIL 会释放）。
+    用于：① 服务启动时 qwen/豆包/sherpa 全部 load 失败的兜底（main.py 优先链最后一级）；
+    ② Session._run_turn 里前三档都为 None 时的整段重转写；③ cli.m0_pipeline --wav/--mic
+    （它只传批量 asr，不传流式后端）。调用方用 asyncio.to_thread 包裹（GIL 会释放）。
     模型不保证并发安全，内部加锁串行。
     """
 
@@ -330,10 +346,23 @@ class ASR:
         self._model = None
         self._lock = threading.Lock()
 
+    @property
+    def backend_label(self) -> str | None:
+        """批量档实际加载了哪个后端。配置里的 `asr_model` 只是 faster-whisper 的档位名，
+        真正跑 whisper.cpp 时照它回显会把人带偏（/api/health 因此改读本属性）。"""
+        if self._backend == "whispercpp":
+            return f"whisper.cpp:{Path(self.cfg.asr_ggml_model).name}"
+        if self._backend == "faster":
+            return f"faster-whisper:{self.cfg.asr_model}"
+        return None
+
     def load(self) -> None:
         if self._model is not None:
             return
-        if self.cfg.asr_backend in ("auto", "whispercpp") and self._try_load_whispercpp():
+        # 只有显式点名 faster 才跳过 whisper.cpp。旧实现按 ("auto","whispercpp") 判断，
+        # 于是 asr_backend=doubao/sherpa 时批量兜底会绕开本机已缓存的 ggml 权重，
+        # 直接去网上拉 3 GB faster-whisper（冒烟 4/4 就是这样卡死的）。
+        if self.cfg.asr_backend != "faster" and self._try_load_whispercpp():
             return
         if self.cfg.asr_backend == "whispercpp":
             raise RuntimeError("asr_backend=whispercpp 但 pywhispercpp/ggml 权重不可用")
@@ -366,10 +395,14 @@ class ASR:
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         from faster_whisper import WhisperModel
+        # download_root 下已有完整快照时按「本地目录」传参：传模型名只会走 hub 缓存布局
+        # （models--Systran--…），那里少一个 model.bin 就整份重下 3 GB。
+        local = Path(self.cfg.asr_download_root) / f"faster-whisper-{self.cfg.asr_model}"
+        model = str(local) if (local / "model.bin").is_file() else self.cfg.asr_model
         logger.info("loading faster-whisper %s (%s) ...",
                     self.cfg.asr_model, self.cfg.asr_compute_type)
         self._model = WhisperModel(
-            self.cfg.asr_model,
+            model,
             device="cpu",
             compute_type=self.cfg.asr_compute_type,
             cpu_threads=self.cfg.asr_threads,

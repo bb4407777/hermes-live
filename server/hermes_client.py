@@ -1,9 +1,14 @@
 """Hermes gateway 8647 的 SSE 客户端。
 
-事实依据（api_server.py，只读核实过）：
+事实依据（api_server_openai_routes.py / api_server.py，只读核实过）：
 - 带 X-Hermes-Session-Id 头时历史从 state.db 加载、body 历史被忽略 → 每轮只发最新 user 消息
+- **不带该头时网关用 sha256(system_prompt + 首条 user 消息) 派生会话 id**
+  （api_server_openai_routes.py:494 → api_server.py:1027）。语音的 system_prompt 固定，
+  开口第一句又容易重复（"在吗"），会静默复活陈年旧会话并把它的历史灌进下一轮 →
+  所以本客户端永远自带 mint 出来的随机 id
 - 响应头回传 X-Hermes-Session-Id（会话压缩可能轮换 id）→ 每次响应都要更新本地保存值
 - 请求内 system 消息 = 临时叠加在核心 prompt 之上（不改 Hermes 配置）
+- body 里的 model 字段被网关忽略（实际模型由 profile 决定），改它不影响走哪个模型
 - 客户端断开 SSE → 网关 agent.interrupt() + task cancel → barge-in 直接断连接即可
 - SSE 线格式：OpenAI chunk + `event: hermes.tool.progress` 自定义事件 + `: keepalive` 注释行
 """
@@ -12,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator
 
@@ -20,6 +26,12 @@ import aiohttp
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def mint_session_id() -> str:
+    """随机会话 id。绝不能置空：空 id 会让网关按 sha256(system_prompt+首句) 派生
+    会话身份，同一句开场白（如"在吗"）会复活几个星期前那条会话的陈年历史。"""
+    return f"hl-{uuid.uuid4().hex[:16]}"
 
 
 @dataclass
@@ -34,10 +46,14 @@ class HermesClient:
     def __init__(self, cfg: Config, http: aiohttp.ClientSession):
         self.cfg = cfg
         self.http = http
-        self.session_id: str | None = None  # 跨 WS 连接保持（单用户工具，服务级共享）
+        # 服务级当前会话 id：启动即 mint 新随机 id，绝不复用/置空。
+        # 空 id 会让网关按 sha256(system_prompt + 首句) 派生身份，同一句开场白
+        # （实测 "在吗"）会命中几个星期前那条语音会话，把旧案件材料整段灌回上下文。
+        self.session_id: str = mint_session_id()
 
-    def new_session(self) -> None:
-        self.session_id = None
+    def new_session(self) -> str:
+        self.session_id = mint_session_id()
+        return self.session_id
 
     async def health(self) -> bool:
         try:
@@ -50,14 +66,18 @@ class HermesClient:
         except Exception:
             return False
 
-    async def chat_stream(self, user_text: str) -> AsyncIterator[HermesEvent]:
-        """流式对话。取消迭代（task cancel / 连接关闭）= 网关中断 run，不白烧 token。"""
-        headers = {
+    def headers(self) -> dict[str, str]:
+        """会话 id 无条件带上：一旦为空，网关改用 sha256(system_prompt+首句) 派生身份，
+        同一句开场白（"在吗"）就会挂回几个星期前那条会话的历史 —— 跨案串内容。"""
+        return {
             "Authorization": f"Bearer {self.cfg.hermes_api_key}",
             "Content-Type": "application/json",
+            "X-Hermes-Session-Id": self.session_id,
         }
-        if self.session_id:
-            headers["X-Hermes-Session-Id"] = self.session_id
+
+    async def chat_stream(self, user_text: str) -> AsyncIterator[HermesEvent]:
+        """流式对话。取消迭代（task cancel / 连接关闭）= 网关中断 run，不白烧 token。"""
+        headers = self.headers()
         body = {
             "model": self.cfg.hermes_model,
             "stream": True,

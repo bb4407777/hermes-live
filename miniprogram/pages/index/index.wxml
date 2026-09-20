@@ -28,6 +28,8 @@
         <view class="orb {{state}}"></view>
       </view>
       <text class="orb-label">{{running ? '点击停止' : '点击开始'}}</text>
+      <!-- 半双工：开口打断不了，thinking/speaking 期间只有这个按钮能停 -->
+      <view class="interrupt-btn" wx:if="{{canInterrupt}}" bindtap="interrupt">打断</view>
     </view>
   </view>
 

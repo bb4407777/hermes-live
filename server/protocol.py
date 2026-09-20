@@ -4,6 +4,10 @@
   上行 0x01 + PCM16LE            16kHz mono，固定 512 样本（1024 字节 = 32ms）
   下行 0x01 + turn(u8) + PCM16LE 24kHz mono。turn 字节用于打断竞态：
                                   客户端只播放 turn == 当前 turn 的帧，旧帧自然丢弃。
+                                  ⚠️ 只有 1 字节，而 JSON 事件里的 turn 是完整整数：
+                                  客户端比对音频帧时必须按 & 0xFF 取值（网页 worklet 与小程序
+                                  Player 都已这么写），否则第 256 轮起帧头与 JSON 永不相等，
+                                  AI 全程静音。回报 playback_done 时仍用完整 turn（服务端按它记 Event）。
 其余控制/文本一律 JSON 文本帧（本地回环不省带宽，省调试成本）。
 """
 

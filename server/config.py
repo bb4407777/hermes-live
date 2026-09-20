@@ -21,6 +21,8 @@ class Config:
     # Hermes gateway（只读依赖，绝不重启/修改它）
     hermes_base_url: str = "http://127.0.0.1:8647"
     hermes_api_key: str = "hermes-local-key"
+    # 只作占位：网关不用 body.model 选模型（实测忽略），实际模型由 ~/.hermes/config.yaml
+    # 的默认 provider 决定。想换模型改 Hermes 配置，改这里没用。
     hermes_model: str = "k3"
     # 每轮叠加的临时 system 提示（网关将其层叠在核心 prompt 之上，不改 Hermes 配置）
     voice_system_prompt: str = (
@@ -68,7 +70,8 @@ class Config:
     asr_sherpa_threads: int = 4
     asr_ggml_model: str = "models/ggml/ggml-large-v3-turbo-q5_0.bin"
     asr_threads: int = 6
-    asr_model: str = "large-v3-turbo"   # faster-whisper 档位，可降 "small" 省内存
+    asr_model: str = "large-v3-turbo"   # 仅 faster-whisper 兜底档位（可降 "small" 省内存）；
+                                        # 回显给客户端的实际档位见 Session.asr_label()
     asr_compute_type: str = "int8"
     asr_language: str = "zh"
     asr_beam_size: int = 1
@@ -89,7 +92,10 @@ class Config:
     kokoro_voices: str = str(Path(__file__).resolve().parent.parent / "models/kokoro/voices-v1.1-zh.bin")
     kokoro_voice: str = "zf_001"       # kokoro 音色（zf_001=普通话女声）
     kokoro_speed: float = 1.0          # kokoro 语速（0.5–2.0）
-    tts_lookahead: int = 1              # 预合成句数
+    tts_lookahead: int = 2              # 预合成句数（1 时句间容易断流：下一句还没出声，
+                                        # 上一句已播完 → 客户端欠载卡顿）
+    # 音频发完后等客户端 playback_done 的余量：客户端预灌水位 + 网络抖动 + 播放落后于发送
+    playback_grace_ms: int = 900
 
     # 分句
     sentence_max_buffer: int = 50       # 缓冲超过此长度时逗号也可切

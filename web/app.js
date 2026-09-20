@@ -1,5 +1,5 @@
 // Hermes-live 前端主逻辑（结构参考 gpt-live public/app.js：els / setStatus / transcript）。
-import { AudioIO } from '/web/audio.js';
+import { AudioIO } from '/web/audio.js?v=0.4.8';  // 版本号=缓存破壁，改版同步 audio.js 的 WORKLET_V
 
 const els = {
   status: document.getElementById('status'),
@@ -24,7 +24,8 @@ const STATE_LABEL = {
   idle: '已暂停',
   listening: '在听，你说',
   thinking: 'Hermes 思考中…',
-  speaking: '播放回答（开口可打断）',
+  // 半双工（服务端 session.py 在 speaking 不处理上行帧）：开口打断不了，用「打断」按钮
+  speaking: '播放回答中…（点「打断」可停）',
 };
 
 let ws = null;
@@ -34,12 +35,14 @@ let agentTurn = -1;
 
 const audio = new AudioIO({
   onFrame: (buf) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      const frame = new Uint8Array(1 + buf.byteLength);
-      frame[0] = 0x01;
-      frame.set(new Uint8Array(buf), 1);
-      ws.send(frame);
-    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // 上行背压：隧道抖动时帧队列无界增长会让 VAD 整体延后（体感"反应慢/断续"），
+    // 宁可丢麦克风帧也不让旧音频压着新音频
+    if (ws.bufferedAmount > 64 * 1024) return;
+    const frame = new Uint8Array(1 + buf.byteLength);
+    frame[0] = 0x01;
+    frame.set(new Uint8Array(buf), 1);
+    ws.send(frame);
   },
   onLevel: (level) => {
     if (els.orb.className === 'listening') {
@@ -49,7 +52,12 @@ const audio = new AudioIO({
       els.orb.style.transform = '';
     }
   },
-  onPlaybackDone: (turn) => sendJson({ type: 'playback_done', turn }),
+  onPlaybackDone: (turn) => {
+    // worklet 回的是下行音频头那个字节（u8）；服务端按完整 turn 记 Event，
+    // 所以用主线程的 curTurn 回报。字节对得上才认，避免旧 turn 的迟到 done
+    // 把新一轮的等待窗提前戳开（那样喇叭还在播就开麦了）。
+    if ((curTurn & 0xFF) === turn) sendJson({ type: 'playback_done', turn: curTurn });
+  },
 });
 
 function sendJson(obj) {
@@ -57,6 +65,14 @@ function sendJson(obj) {
 }
 
 function setStatus(text) { els.status.textContent = text; }
+
+// ── 2026-09-20 手机端无声诊断：屏上计数，区分「帧没到」还是「到了没播」 ──
+let dbgRxFrames = 0, dbgRxBytes = 0, dbgLastReason = '';
+function dbgText() {
+  const a = (typeof audio !== 'undefined' && audio && audio.dbg) ? audio.dbg() : '';
+  return `帧${dbgRxFrames}/${(dbgRxBytes / 1024).toFixed(0)}KB${a ? ' · ' + a : ''}`;
+}
+function dbgShow() { setStatus(dbgText()); }
 
 function addBubble(cls, text) {
   const div = document.createElement('div');
@@ -120,6 +136,11 @@ function handleMessage(msg) {
       break;
     case 'tts_sentence':
       break; // 预留：逐句高亮
+    case 'tts_end':
+      // 本 turn 音频已发完：worklet 只有在这个标记下才允许上报播完，
+      // 否则句间 >300ms 的正常空隙会被当成播完，服务端提前回到 listening 吃到回声
+      if (msg.turn === curTurn) audio.setTurnEnd(msg.turn);
+      break;
     case 'replaced':
       // 服务端单活跃连接：本页被新页面顶替，主动退场，不再自动重连
       wantLive = false;
@@ -139,7 +160,27 @@ function handleMessage(msg) {
 // 手机/远程模式：页面可由别处托管（如 iOS 壳的回环服务器），用 ?server=host:port&token=xxx 指回 Mac
 const PAGE_PARAMS = new URLSearchParams(location.search);
 const SERVER = PAGE_PARAMS.get('server') || location.host;
-const TOKEN = PAGE_PARAMS.get('token') || '';
+
+// token 只从 URL 读、不落地的话，书签里少带一次 ?token= 就是整页不可用
+// （实测 2026-09-19 手机 Safari 打开裸域名 → /ws 401，页面看着在收音其实一个字节没发出去）
+const TOKEN = PAGE_PARAMS.get('token') || localStorage.getItem('hl_token') || '';
+if (PAGE_PARAMS.get('token')) {
+  try { localStorage.setItem('hl_token', PAGE_PARAMS.get('token')); } catch { /* 隐私模式写不进 */ }
+}
+
+// WS 被 401 拒掉时浏览器只给一个裸 Event，页面显示"启动失败"，用户猜不到是少 token。
+// 探一次 /api/health（该端点不鉴权），确认真的开了鉴权再把话说清楚。
+let authHintShown = false;
+async function hintAuth() {
+  if (authHintShown || TOKEN) return;
+  authHintShown = true;
+  try {
+    const proto = location.protocol === 'https:' ? 'https' : 'http';
+    const resp = await fetch(`${proto}://${SERVER}/api/health`);
+    const data = await resp.json();
+    if (data.auth_required) addLine('error', '服务要求 token：请在网址后加 ?token=xxx（打开一次即记住）');
+  } catch { /* 服务确实没起或网络不通：保持原始报错 */ }
+}
 
 // ---- 连接管理：单飞防重入 + 断线自愈 ----
 // wantLive = 用户意图“正在对话”。断线（息屏/切后台/隧道抖动）时麦克风还开着，
@@ -155,11 +196,16 @@ function connect() {
   if (connectPromise) return connectPromise;
   connectPromise = new Promise((resolve, reject) => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${SERVER}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = () => { setStatus('已连接'); resolve(); };
-    ws.onerror = (e) => reject(e);
-    ws.onclose = (e) => {
+    const socket = new WebSocket(`${proto}://${SERVER}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
+    ws = socket;
+    socket.binaryType = 'arraybuffer';
+    // 旧 socket 的回调可能在重连后才到（隧道抖动时尤其常见）。不判身份就会把新连接的
+    // 状态改成 idle / 停掉刚建好的 audio，表现为"明明连上了却一直没声音"。
+    const stale = () => socket !== ws;
+    socket.onopen = () => { if (!stale()) { setStatus('已连接'); resolve(); } };
+    socket.onerror = (e) => { if (!stale()) { hintAuth(); reject(e); } };
+    socket.onclose = (e) => {
+      if (stale()) return;
       if (e.code === 4001) {
         // 被新连接顶替（服务端单活跃连接）：本页退场，不与新页面互踢
         wantLive = false;
@@ -178,14 +224,21 @@ function connect() {
         els.btnToggle.textContent = '开始对话';
       }
     };
-    ws.onmessage = (e) => {
+    socket.onmessage = (e) => {
+      if (stale()) return;
       if (typeof e.data === 'string') {
         handleMessage(JSON.parse(e.data));
       } else {
         const view = new Uint8Array(e.data);
         if (view[0] === 0x01) {
           const turn = view[1];
-          audio.playAudio(turn, e.data.slice(2));
+          dbgRxFrames++; dbgRxBytes += e.data.byteLength;
+          if (dbgRxFrames === 1 || dbgRxFrames % 10 === 0) dbgShow();
+          // 直接交出原 buffer + 头长偏移：128ms/句的音频不必每块再拷一次
+          audio.playAudio(turn, e.data, 2);
+        } else {
+          dbgLastReason = '未知帧型 0x' + view[0].toString(16);
+          dbgShow();
         }
       }
     };
@@ -207,6 +260,11 @@ function scheduleReconnect() {
     try {
       await connect();
       reconnectDelay = 1000;
+      // iOS 挂起后 AudioContext 可能已 close：光重连 WS 会出现"已重连但永远 listening"
+      try {
+        if (audio.running) audio.resumeIfNeeded();
+        else await audio.start();
+      } catch { /* 授权/自动播放受限：保持现有页面，用户手点按钮再恢复 */ }
       pushConfig();
       sendJson({ type: 'start' });   // 麦克风一直开着，恢复 listening 后帧自动续上
       setStatus('已重连');
@@ -217,10 +275,13 @@ function scheduleReconnect() {
   }, reconnectDelay);
 }
 
-// 手机息屏/切后台时 iOS 会挂起网络，回前台立即检查补连（不等退避计时）
+// 手机息屏/切后台时 iOS 会挂起网络与 AudioContext，回前台立即检查补连（不等退避计时）。
+// 只补 WS 不够：AudioContext 仍是 suspended，麦克风一帧不出、下行也不播，
+// 界面看着 listening 其实是死的。resume 必须在回前台的手势回调里补一次。
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && wantLive
-      && (!ws || ws.readyState !== WebSocket.OPEN)) {
+  if (document.visibilityState !== 'visible' || !wantLive) return;
+  audio.resumeIfNeeded();
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
     clearReconnect();
     scheduleReconnect();
   }
@@ -256,7 +317,12 @@ els.orb.addEventListener('click', toggle);
 els.btnInterrupt.addEventListener('click', () => sendJson({ type: 'interrupt' }));
 els.btnNewSession.addEventListener('click', () => {
   sendJson({ type: 'new_session' });
+  // 服务端 new_session 会 bump turn，但按钮到 state 事件之间还有一小段窗口；
+  // 本地先清播放队列，旧会话的尾巴才不会混进新会话的第一句
+  audio.clear();
   els.transcript.innerHTML = '';
+  agentBubble = null;
+  agentTurn = -1;
 });
 
 els.btnRestart.addEventListener('click', async () => {

@@ -95,6 +95,12 @@ class Player {
   }
 
   setTurn(turn) {
+    // 同一 turn 重复调用必须直接返回：服务端每个话轮会发三条同 turn 的 state
+    // （thinking / speaking / listening），旧写法无条件 stop 掉全部已排度的音源，
+    // 于是超时或异常路径上那条 listening 会把正在播的尾巴当场掐断，还顺手把
+    // _ended 复位、_doneTimer 清掉 → playback_done 永远不再上报（网页端 worklet
+    // 同一个 bug，2026-09-20 一起修）。真需要丢缓冲的场景 turn 一定已经变了。
+    if (turn === this.turn) return;
     this.turn = turn;
     this._played = false;
     this._ended = false;                  // 收到服务端 tts_end 才置真
@@ -104,12 +110,19 @@ class Player {
     if (this._doneTimer) { clearTimeout(this._doneTimer); this._doneTimer = null; }
   }
 
-  // 服务端告知本 turn 音频已全部发完：之后缓冲排空才报 playback_done
-  endTurn() { this._ended = true; }
+  /** 服务端告知本 turn 音频已全部发完：之后缓冲排空才报 playback_done。
+   *  必须比对 turn：被打断那一轮迟到的 tts_end 若认下来，当前这轮还没播完就被
+   *  判定结束 → 提前恢复录音，把喇叭里的 TTS 录进下一轮。 */
+  endTurn(turn) {
+    if (turn === undefined || turn === this.turn) this._ended = true;
+  }
 
   // pcmBuf: ArrayBuffer，PCM16LE 24k mono
   play(turn, pcmBuf) {
-    if (turn !== this.turn) return;       // 打断竞态：旧 turn 迟到帧直接丢
+    // 帧头里的 turn 是 1 字节（0x01 + turn(u8) + PCM），state 事件带的是完整整数：
+    // 比对必须同样取低 8 位，否则第 256 轮起两值永不相等，所有音频被当旧 turn 丢掉。
+    // 回报 playback_done 时仍用完整 turn（this.turn），服务端按它记 Event。
+    if ((turn & 0xFF) !== (this.turn & 0xFF)) return;
     const i16 = new Int16Array(pcmBuf);
     if (!i16.length) return;
     const buf = this.ctx.createBuffer(1, i16.length, 24000);

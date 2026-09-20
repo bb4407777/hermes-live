@@ -1,5 +1,9 @@
 # iOS 版安装（免费个人签，7 天有效期）
 
+> 2026-08-14 起为**原生音频版**：SwiftUI + AVAudioEngine 录音/播放，WebSocket 直连 Mac，
+> 不再走 WKWebView 托管网页。带了 `UIBackgroundModes=audio`，**锁屏/切后台对话不断**
+> （旧 WebView 壳锁屏即挂起）。安装步骤不变。
+
 ## 一次性准备（约 30 分钟，大头是下载 Xcode）
 
 1. **装 Xcode**：App Store 搜 Xcode 安装（免费，约 15GB；本机目前只有命令行工具，编不了 iOS）。
@@ -23,18 +27,21 @@ host: 0.0.0.0
 auth_token: 随便一串长密码     # 暴露到局域网必须设，app 设置页填同一串
 ```
 
-重启 Hermes-Live 菜单栏 app（或 `kill $(cat tmp/server.pid)` 后重开）。
+重启服务：`curl -X POST http://127.0.0.1:8698/api/restart`，或 launchd 常驻的话
+`kill $(pgrep -f server.main)`（KeepAlive 会自动拉起）。
 
 ## 手机端使用
 
 - 首屏填 Mac 地址：家里 Wi-Fi 填局域网 IP（Mac 上 `ipconfig getifaddr en0` 查）+ `:8698`；
   两端都装 Tailscale 的话填 Mac 的 100.x 地址，**在外面 4G 也能连**（且免局域网权限弹窗）。
 - Token 填 Mac 配置里那串。右上角齿轮可改。
+- 打开即自动连接并开始对话；点圆球停止/开始。
 - 首次会弹两个授权：本地网络（连局域网 Mac 需要）+ 麦克风。
+- **锁屏/切后台继续对话**：音频后台模式保活，断线会自动重连（退避 1s→10s）。
 
 ## 已知边界
 
 - 个人签 **7 天过期**：app 打不开时连 Xcode ⌘R 重装即可，数据（服务器地址）不丢。
-- 锁屏/切后台会挂起对话（iOS 对 WKWebView 的限制），回前台重新点开始即可。
-- 页面由 app 内回环服务器托管（保 getUserMedia 的安全上下文），WebSocket 直连 Mac——
-  架构与 Mac 版同源，`web/` 改一处两端生效（工程里是文件夹引用，不用拷贝）。
+- 接电话等音频打断后会自动恢复引擎；若收音异常，点圆球停一次再开即可。
+- 架构与网页版同协议（WS 二进制帧 + JSON 控制），`server/` 改动两端自动生效；
+  `web/` 页面改动不再影响 iOS 端（原生 UI 在 `ios/Sources/ChatView.swift`）。

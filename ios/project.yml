@@ -11,9 +11,6 @@ targets:
     sources:
       - path: Sources
     resources:
-      # 直接引用仓库里的 web/（蓝色文件夹引用），Mac/手机共用同一套页面，改一处两端生效
-      - path: ../web
-        type: folder
       - path: Assets.xcassets
     info:
       path: Info.plist
@@ -21,6 +18,8 @@ targets:
         CFBundleDisplayName: Hermes-Live
         NSMicrophoneUsageDescription: Hermes-live 语音对话需要使用麦克风。
         NSLocalNetworkUsageDescription: 需要连接同一 Wi-Fi 下的 Mac 上的 Hermes-live 服务。
+        UIBackgroundModes:
+          - audio          # 原生音频后锁屏/切后台继续对话（playAndRecord 会话保活）
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

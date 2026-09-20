@@ -32,6 +32,8 @@ Page({
   _ws: null, _rec: null, _player: null,
   _agentMsgId: null, _agentTurn: -1, _msgSeq: 0,
   _connecting: false,
+  _connectPromise: null,
+  _sockSeq: 0,          // 每次新建/主动关闭都 +1：老 socket 的回调不再碰新连接的状态
 
   onLoad() {
     const app = getApp();
@@ -53,7 +55,18 @@ Page({
 
   onUnload() {
     this._stopAll();
+    // 页面销毁必须关 WS：只停录音的话，服务端那条 Session 一直挂着，
+    // 在途 turn 继续合成下发，回来重开页面又是新连接（旧连接只能等顶替）
+    this._closeSocket();
     if (this._player) this._player.close();
+  },
+
+  _closeSocket() {
+    this._sockSeq++;
+    const ws = this._ws;
+    this._ws = null;
+    this.setData({ connected: false, canInterrupt: false });
+    if (ws) { try { ws.close(); } catch (_) {} }
   },
 
   // ---------- 自动开始 ----------
@@ -88,19 +101,39 @@ Page({
   },
 
   _connect() {
+    // 单飞：_autoStart/toggle 有 _connecting 门，但 sendText 没有——
+    // 两条 socket 并存时后开的赢，先开的那条的 onClose 会把 this._ws 清空，
+    // 表现为「连接断开」但服务端其实还在发音频
+    if (this._connectPromise) return this._connectPromise;
+    const p = this._openSocket();
+    this._connectPromise = p;
+    p.catch(() => {}).then(() => { if (this._connectPromise === p) this._connectPromise = null; });
+    return p;
+  },
+
+  _openSocket() {
     const url = this._wsUrl();
+    const seq = ++this._sockSeq;
+    const mine = () => this._sockSeq === seq;
     return new Promise((resolve, reject) => {
       const ws = wx.connectSocket({ url });
       let opened = false;
-      ws.onOpen(() => { opened = true; this._ws = ws; this.setData({ connected: true }); resolve(); });
-      ws.onError((e) => { if (!opened) reject(new Error(e.errMsg || url)); });
+      ws.onOpen(() => { if (!mine()) return; opened = true; this._ws = ws; this.setData({ connected: true }); resolve(); });
+      ws.onError((e) => { if (!opened && mine()) reject(new Error(e.errMsg || url)); });
       ws.onClose(({ code, reason }) => {
+        if (!mine()) return;
+        this._sockSeq++;        // 这条 socket 之后的事件（含重复 onClose）一律不再处理
         this._ws = null;
+        // 没连上就关了（域名白名单/证书/隧道 530）：必须让 promise 落地，
+        // 否则单飞槽位一直占着，用户再点「开始」也只会拿到这个死 promise
+        if (!opened) reject(new Error('连接被拒绝，检查服务器地址与 token'));
         this.setData({ connected: false, running: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
         if (this._rec) this._rec.stop();
         if (opened && code !== 1000) this._addMsg('error', `连接断开(${code})${reason ? '：' + reason : ''}`);
       });
-      ws.onMessage(({ data }) => {
+      ws.onMessage((m) => {
+        if (!mine()) return;
+        const data = m.data;
         if (typeof data === 'string') this._handleJson(JSON.parse(data));
         else this._handleBinary(data);
       });
@@ -121,7 +154,12 @@ Page({
         break;
       case 'state': {
         const st = msg.state;
-        this.setData({ state: st, stateLabel: STATE_LABEL[st] || st, canInterrupt: false });
+        // 半双工下开口打断不了（speaking 不处理上行帧），唯一出口是「打断」按钮，
+        // 所以 thinking/speaking 必须把按钮放出来（此前恒为 false，等于没有打断）
+        this.setData({
+          state: st, stateLabel: STATE_LABEL[st] || st,
+          canInterrupt: st === 'thinking' || st === 'speaking',
+        });
         if (msg.turn !== undefined) this._player.setTurn(msg.turn);
         // 半双工：speaking 时停录（防喇叭回声进麦），listening 时恢复
         if (st !== 'listening') this.setData({ partialText: '' });
@@ -137,7 +175,7 @@ Page({
         break;
       }
       case 'tts_end':
-        this._player.endTurn();
+        this._player.endTurn(msg.turn);
         break;
       case 'asr_partial':
         // 更新实时字幕，同时滚动到底部让 partial 气泡保持可见
@@ -282,7 +320,7 @@ Page({
     app.globalData.token  = this.data.token.trim();
     wx.setStorageSync('hl_server', app.globalData.server);
     wx.setStorageSync('hl_token',  app.globalData.token);
-    if (this._ws) { try { this._ws.close(); } catch (_) {} this._ws = null; }
+    this._closeSocket();
     this.setData({ showSetup: false });
     // 保存后自动重连
     if (!this.data.running) setTimeout(() => this._autoStart(), 300);

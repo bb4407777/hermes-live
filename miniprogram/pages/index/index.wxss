@@ -30,7 +30,7 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
                padding: 8rpx 18rpx; font-size: 24rpx; white-space: nowrap; margin-left: auto; }
 
 /* 语音球 */
-.orb-area  { display: flex; flex-direction: column; align-items: center; padding: 24rpx 0 18rpx; border-top: 1rpx solid #21262d; }
+.orb-area  { position: relative; display: flex; flex-direction: column; align-items: center; padding: 24rpx 0 18rpx; border-top: 1rpx solid #21262d; }
 .orb-wrap  { width: 160rpx; height: 160rpx; display: flex; align-items: center; justify-content: center; }
 .orb {
   width: 140rpx; height: 140rpx; border-radius: 50%;
@@ -42,6 +42,10 @@ page { background: #0d1117; color: #e6edf3; height: 100%; box-sizing: border-box
 .orb.speaking  { filter: none; animation: breathe .9s ease-in-out infinite; box-shadow: 0 0 70rpx #bc8cff66; }
 @keyframes breathe { 50% { transform: scale(1.08); } }
 .orb-label { font-size: 22rpx; color: #8b949e; margin-top: 12rpx; }
+/* 绝对定位：只在 thinking/speaking 出现，不占流内高度，避免头部忽高忽低 */
+.interrupt-btn { position: absolute; right: 32rpx; bottom: 26rpx; background: #da3633; color: #fff;
+                 border: 1rpx solid #f85149; border-radius: 999rpx; padding: 12rpx 28rpx;
+                 font-size: 24rpx; line-height: 1.2; }
 
 /* 对话记录 */
 .transcript { flex: 1; height: 0; padding: 16rpx 24rpx; box-sizing: border-box; }

@@ -24,5 +24,5 @@ $PY scripts/make_test_wav.py "请只回答收到两个字。" >/dev/null || FAIL
 $PY -m cli.m0_pipeline --wav tmp/test16k.wav --out tmp/reply.wav \
   && echo "OK" || { echo "FAIL：全链路未通过"; FAIL=1; }
 
-printf '\n== 冒烟%s ==\n' "$([ $FAIL -eq 0 ] && echo 通过 || echo失败)"
+printf '\n== 冒烟%s ==\n' "$([ $FAIL -eq 0 ] && echo 通过 || echo 失败)"
 exit $FAIL

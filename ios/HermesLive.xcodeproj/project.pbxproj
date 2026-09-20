@@ -8,14 +8,18 @@
 
 /* Begin PBXBuildFile section */
 		161A150DE35E9DCDE96A1ABB /* HermesLiveApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B915B887EA2C5EA5F3ABCE1 /* HermesLiveApp.swift */; };
-		298C4EAC27D53F79966BFDD9 /* LoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08069308332A4E4E2B8D9451 /* LoopbackServer.swift */; };
-		D2D5678235C9D19C87E047A2 /* WebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB92B554BCAA14DE46951749 /* WebView.swift */; };
+		74F8656989CD08AAE56069ED /* AudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614907B2E3D50437B530C28B /* AudioController.swift */; };
+		A2595729347DC9B9ABCA14BA /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A4D80511989E1553D3AE21 /* ChatView.swift */; };
+		C6C038714CBC44FE06FB2A07 /* HermesWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D4E847D71BD98A7F2B9B56 /* HermesWSClient.swift */; };
+		ED061D3C49D2B51C3203EA5E /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E227ACA237037095FC1FDA /* ChatViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		08069308332A4E4E2B8D9451 /* LoopbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopbackServer.swift; sourceTree = "<group>"; };
+		10A4D80511989E1553D3AE21 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		24E227ACA237037095FC1FDA /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		4B915B887EA2C5EA5F3ABCE1 /* HermesLiveApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesLiveApp.swift; sourceTree = "<group>"; };
-		AB92B554BCAA14DE46951749 /* WebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebView.swift; sourceTree = "<group>"; };
+		614907B2E3D50437B530C28B /* AudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioController.swift; sourceTree = "<group>"; };
+		68D4E847D71BD98A7F2B9B56 /* HermesWSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesWSClient.swift; sourceTree = "<group>"; };
 		FA861236CD2A36F341536972 /* HermesLive.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HermesLive.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -23,9 +27,11 @@
 		0B4909C9598DB34F599392CD /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				614907B2E3D50437B530C28B /* AudioController.swift */,
+				10A4D80511989E1553D3AE21 /* ChatView.swift */,
+				24E227ACA237037095FC1FDA /* ChatViewModel.swift */,
 				4B915B887EA2C5EA5F3ABCE1 /* HermesLiveApp.swift */,
-				08069308332A4E4E2B8D9451 /* LoopbackServer.swift */,
-				AB92B554BCAA14DE46951749 /* WebView.swift */,
+				68D4E847D71BD98A7F2B9B56 /* HermesWSClient.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -104,9 +110,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				74F8656989CD08AAE56069ED /* AudioController.swift in Sources */,
+				A2595729347DC9B9ABCA14BA /* ChatView.swift in Sources */,
+				ED061D3C49D2B51C3203EA5E /* ChatViewModel.swift in Sources */,
 				161A150DE35E9DCDE96A1ABB /* HermesLiveApp.swift in Sources */,
-				298C4EAC27D53F79966BFDD9 /* LoopbackServer.swift in Sources */,
-				D2D5678235C9D19C87E047A2 /* WebView.swift in Sources */,
+				C6C038714CBC44FE06FB2A07 /* HermesWSClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

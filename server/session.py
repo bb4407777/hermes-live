@@ -3,7 +3,8 @@
 状态机（命名沿用 gpt-live）：idle → listening → thinking → speaking → listening
 - listening：VAD 分段；段结束 → thinking 开新 turn
 - thinking：ASR + Hermes SSE；忽略上行音频（防噪声误取消），只认手动 interrupt
-- speaking：全双工，VAD 走高门槛打断档；音频发完后等 playback_done（或按时长估算超时）
+- speaking：半双工（用户 2026-08-11 定：排队/全双工方案常出 bug，先不跑 VAD 打断），
+  上行音频丢弃；音频发完后等 playback_done（tts_end 已下发，等待窗按时长估算）
 barge-in：turn+1（在途旧音频帧被客户端按 turn 字节丢弃）→ 取消 turn 任务
 （内部级联取消 TTS 与 Hermes SSE，断开 SSE 即触发网关 agent.interrupt，不白烧 token）
 → pre-roll 灌回分段器无缝进入新一轮。
@@ -110,6 +111,11 @@ class Session:
     async def on_audio(self, pcm: bytes) -> None:
         if len(pcm) != FRAME_BYTES:
             return
+        # 出站已死（on_conn_lost 打的标记）就别再起话轮：send_json/send_audio 已被掐掉，
+        # 这里却仍会照常 ASR + 打网关，为一个永远收不到回音的连接白烧 token，
+        # 要等 heartbeat 把这条半开连接判死才停（最多 ~30s，期间每句话一轮）。
+        if self.closed:
+            return
         if self.state == "listening":
             if time.monotonic() < self.listen_ignore_until:
                 return
@@ -181,13 +187,20 @@ class Session:
                 self._begin_turn(text=text)
         elif t == "new_session":
             await self._cancel_turn()
-            self.hermes.new_session()
-            self.send_json("hello", session_id=None, voice=self.cfg.tts_voice,
-                           asr_model=self.cfg.asr_model, note="新会话")
+            new_id = self.hermes.new_session()
+            self.turn += 1   # 作废在途旧音频帧：客户端否则会继续放被打断那一轮的残留
+            self.playback_done.clear()
+            self._recent_tts_texts.clear()
+            self.send_json("hello", session_id=new_id, voice=self.cfg.tts_voice,
+                           asr_model=self.asr_label(), note="新会话")
             if self.state != "idle":
                 self._enter_listening()
         elif t == "playback_done":
-            ev = self.playback_done.get(int(obj.get("turn", -1)))
+            pt = int(obj.get("turn", -1))
+            ev = self.playback_done.get(pt)
+            # 这条日志是「客户端到底播没播」唯一的观测点：静音类 bug 里服务端
+            # 一切正常（音频照发、状态照回 listening），只有这里会缺席。
+            logger.info("playback_done turn=%s%s", pt, "" if ev else "（无在途 turn，忽略）")
             if ev:
                 ev.set()
         elif t == "set_config":
@@ -196,7 +209,7 @@ class Session:
             if r := obj.get("tts_rate"):
                 self.cfg.tts_rate = str(r)
             self.send_json("hello", session_id=self.hermes.session_id,
-                           voice=self.cfg.tts_voice, asr_model=self.cfg.asr_model)
+                           voice=self.cfg.tts_voice, asr_model=self.asr_label())
         elif t == "restart":
             import os
             import sys
@@ -215,6 +228,17 @@ class Session:
         await self._cancel_turn()
         if self.doubao_asr is not None:
             self.doubao_asr.reset()   # cancel 在途豆包会话任务，防连接关闭后泄漏
+
+    def on_conn_lost(self) -> None:
+        """出站写失败时由 ws_writer 回告：停止出站 + 打断在途 turn。
+
+        不这么做的话 turn 协程会卡在等一个永不再来的 playback_done，
+        同时后续音频帧继续往无界 outbox 里堆。
+        """
+        if self.closed:
+            return
+        self.closed = True
+        asyncio.create_task(self._cancel_turn())
 
     # ---------- 状态迁移 ----------
 
@@ -262,6 +286,20 @@ class Session:
                     return
 
     # ---------- turn 主流程 ----------
+
+    def asr_label(self) -> str:
+        """本次连接实际会用到哪一档 ASR——hello/health 回显给客户端看的就是它。
+
+        不能直接回显 `cfg.asr_model`：那只是 faster-whisper 的档位名，线上跑豆包时
+        网页状态条会显示 "ASR large-v3"，按它排查会走错方向。分支顺序与 _run_turn 一致。
+        """
+        if self.doubao_asr is not None:
+            return "doubao"
+        if self.asr_stream is not None:
+            return "sherpa-paraformer"
+        if self.qwen_asr is not None and self.qwen_asr.available:
+            return "qwen3-asr-1.7b"
+        return self.asr.backend_label or self.cfg.asr_model
 
     async def _run_turn(self, t: int, pcm_utt: bytes | None, text: str | None) -> None:
         m = TurnMetrics(turn=t)
@@ -357,6 +395,7 @@ class Session:
         synth_q: asyncio.Queue = asyncio.Queue(maxsize=max(1, self.cfg.tts_lookahead))
         pcm_sent = 0
         first_send: float | None = None
+        last_send = 0.0
         self.playback_done[t] = asyncio.Event()
 
         async def synth_to_queue(sentence: str, chunks: asyncio.Queue) -> None:
@@ -392,6 +431,7 @@ class Session:
 
         pf = asyncio.create_task(prefetcher())
         inflight: asyncio.Task | None = None
+        ended_sent = False
         try:
             while True:
                 item = await synth_q.get()
@@ -412,6 +452,7 @@ class Session:
                             self.barge.reset()
                     pcm_sent += len(pcm)
                     self.send_audio(t, pcm)
+                    last_send = time.monotonic()
                 await inflight  # 让合成异常浮出来
                 inflight = None
             # 音频全部发出（客户端缓冲播放中）：显式告知"本 turn 音频已发完"，
@@ -419,10 +460,18 @@ class Session:
             # 句间断流 >800ms 不再被误判为播完）。
             if first_send is not None:
                 self.send_json("tts_end", turn=t)
+                ended_sent = True
                 dur = pcm_sent / 2 / self.cfg.out_rate
-                remain = max(0.5, dur - (time.monotonic() - first_send) + 0.4)
+                # 客户端播完的时刻：音频是边生成边下发的，慢生成时 first_send+dur 会大幅
+                # 低估（模型想了 40s、只出 20s 语音 → 20s 就超时收口，喇叭其实还在播，
+                # 于是自己的 TTS 被录进下一轮）。取两个下界的较大者：
+                #   first_send + dur  —— 生成比实时快时成立（末尾还有整段缓冲）
+                #   last_send         —— 生成比实时慢时成立（末尾只剩预灌水位那点）
+                # 再加余量覆盖客户端抖动与网络。
+                est_end = max(first_send + dur, last_send)
+                remain = est_end - time.monotonic() + self.cfg.playback_grace_ms / 1000
                 with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(self.playback_done[t].wait(), timeout=remain)
+                    await asyncio.wait_for(self.playback_done[t].wait(), timeout=max(0.5, remain))
         finally:
             pf.cancel()
             if inflight and not inflight.done():
@@ -432,3 +481,9 @@ class Session:
                 left = synth_q.get_nowait()
                 if left:
                     left[2].cancel()
+            # 合成中途抛异常（edge-tts 重试后仍失败）时上面那条 tts_end 发不出去，
+            # 而客户端的收口门只认它：门不开 → 已排队的尾音永远不会上报播完，
+            # 服务端却按异常路径回了 listening 并放开麦克风 → AI 把自己念的尾巴
+            # 录进下一轮。补发一条让客户端干净收口（turn 已作废的会被按 turn 忽略）。
+            if first_send is not None and not ended_sent:
+                self.send_json("tts_end", turn=t)

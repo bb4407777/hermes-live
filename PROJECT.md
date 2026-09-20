@@ -5,7 +5,7 @@
 **Hermes-live**：本机 Hermes gateway 语音对话界面，参照 gpt-live 形态，语音层全免费自建。
 
 - **定位**：律师事务所内部工具，便于语音快速查询案件、讨论法律问题
-- **版本**：0.4.4（2026-08-10）
+- **版本**：0.4.8（2026-09-20）——版本号单一来源 `server/__init__.py`，`/api/health` 回显
 - **仓库**：`ssh://git@ssh.github.com:443/bb4407777/hermes-live.git`
 - **部署**：launchd 常驻（`com.gaochengbin.hermes-live`，KeepAlive，高律师 2026-08-11 定：
   doubao 云端模式内存占用小，非常驻则 Mac 重启后隧道活着、8698 死，手机 502）
@@ -44,47 +44,70 @@
 | 网页端 | `web/` | AudioWorklet、WebSocket 客户端 |
 | 小程序端 | `miniprogram/` | RecorderManager、InnerAudioContext |
 
+### 会话身份（跨案隔离，2026-09-19 修复）
+
+每轮请求都带 `X-Hermes-Session-Id`，值由本服务随机铸造（`hl-<uuid4[:16]>`）：
+
+- **为什么必须自己铸造**：请求头缺这个字段时，网关改用
+  `sha256(system_prompt + "\n" + 首条用户消息)` 派生会话身份，并从 `state.db` 把那条会话的
+  历史整段捞回来。语音场景的首句几乎必然是"在吗""你好"这类固定开场白，实测一次
+  `在吗` 就复活了 2026-09-04 某案的会话：第二轮 prompt 从 11801 token 涨到 42771 token，
+  首 delta 从 4.7s 涨到 11.8s。**对律师工具这是跨案串内容，不是性能问题。**
+- **生命周期**：`HermesClient` 是 app 级单例 → 同一个 session id 跨 WS 重连保持（页面刷新
+  不丢上下文）；点「新会话」或重启服务才轮换。`new_session` 同时 `turn += 1`，否则客户端
+  会继续播放上一轮的残留音频。
+- **`/api/health` 不回显 session id**（该端点不鉴权，属外部可读信息）；只经 WS 的 `hello`
+  发给已鉴权的连接。
+
 ### 状态机
 
 ```
-idle ─────────────> listening ─────────────> thinking ────────> speaking
-  ↑                    │                         │                  │
-  │                    │ VAD 检测到语音结束       │ LLM 开始返回     │
-  │                    ↓                         ↓                  │
-  └────────────────── ASR 识别完成 ────────────> 合成首句 ──────────┘
-                                                                    │
-                                                                    │ barge-in
-                                                                    └──> idle
+idle ──start──> listening ──VAD 段尾/文字──> thinking ──首句音频──> speaking
+  ↑                  ↑                          │                      │
+  │                  └──── playback_done ───────┴────── 打断(按钮) ────┘
+  └──stop                                            （turn+1，旧音频帧作废）
 ```
 
 - **idle**：等待用户说话
 - **listening**：录音中，VAD 监测语音段结束
 - **thinking**：ASR 识别 + LLM 推理，忽略麦克风输入（防噪声误触发）
-- **speaking**：TTS 播放，全双工，高门槛 VAD（≥0.85 持续 320ms）可打断
+- **speaking**：TTS 播放。**半双工**（高律师 2026-08-11 定：排队下一轮的方案常出 bug，
+  维持半双工）——前端在 thinking/speaking 停发麦克风帧，服务端对应分支是 `pass`，
+  `BargeDetector` 因此实际不参与决策；唯一打断入口是客户端「打断」按钮（`{"type":"interrupt"}`）
 
 ### WebSocket 协议
 
 **客户端 → 服务端：**
-- 音频二进制：`0x01` + PCM16（16kHz，单声道，16-bit LE）
+- 音频二进制：`0x01` + PCM16（16kHz，单声道，16-bit LE，固定 512 样本 = 1024 字节 = 32ms）
 - 控制消息（JSON）：
-  - `{"type": "start"}`：开始对话
+  - `{"type": "start", "ptt": false}`：开始对话（`ptt=true` 按住说话，不跑 VAD）
+  - `{"type": "utterance_end"}`：PTT 松手，用攒下的帧开一轮
   - `{"type": "stop"}`：停止对话
+  - `{"type": "interrupt"}`：打断当前 turn（半双工下这是唯一打断入口）
   - `{"type": "text", "text": "..."}`：文字输入
-  - `{"type": "new_session"}`：新会话
+  - `{"type": "new_session"}`：换网关会话身份 + turn 递增
+  - `{"type": "playback_done", "turn": N}`：客户端把第 N 轮音频播完了
   - `{"type": "set_config", "voice": "...", "tts_rate": "..."}`：切换音色/语速
+  - `{"type": "restart"}`：远程重启服务（等价 `POST /api/restart`）
 
 **服务端 → 客户端：**
 - 音频二进制：`0x01` + turn 字节 + PCM16（24kHz）
-  - turn 字节：当前轮次，打断后递增，客户端丢弃旧 turn 音频
-- 事件消息（JSON）：
-  - `{"type": "state", "state": "idle|listening|thinking|speaking"}`
-  - `{"type": "asr_partial", "text": "..."}`：实时字幕（识别中间结果）
-  - `{"type": "asr_final", "text": "..."}`：最终识别结果
-  - `{"type": "agent_text", "text": "...", "done": false}`：LLM 流式输出
-  - `{"type": "agent_text", "text": "", "done": true}`：LLM 完成
-  - `{"type": "tts_sentence", "text": "..."}`：当前合成句
-  - `{"type": "tts_end"}`：本轮 TTS 全部播放完成
-  - `{"type": "error", "message": "..."}`：错误
+  - turn 字节：当前轮次，打断/新会话后递增，客户端丢弃旧 turn 音频
+- 事件消息（JSON，`turn` 字段除 `hello`/`replaced` 外均带上）：
+  - `{"type": "hello", "session_id": "...", "voice": "...", "asr_model": "..."}`：连接建立 /
+    换会话 / 改配置后回，`session_id` 即本轮起使用的网关会话身份
+  - `{"type": "state", "state": "idle|listening|thinking|speaking", "turn": N}`
+  - `{"type": "asr_partial", "text": "..."}`：实时字幕（仅流式 ASR 后端有；qwen 批量档无）
+  - `{"type": "asr_final", "turn": N, "text": "..."}`：最终识别结果（文字轮不发）
+  - `{"type": "agent_delta", "turn": N, "text": "..."}`：LLM 流式增量
+  - `{"type": "agent_done", "turn": N, "finish_reason": "..."}`：LLM 生成结束
+  - `{"type": "tool_progress", "turn": N, "tool": "...", "label": "...", "emoji": "...", "status": "..."}`
+  - `{"type": "tts_sentence", "turn": N, "text": "..."}`：本句开始合成/下发
+  - `{"type": "tts_end", "turn": N}`：**本 turn 音频已全部下发**（不是"已播完"）。客户端必须
+    等它 + 本地缓冲排空后才回 `playback_done`——早回会让服务端提前回 listening，喇叭还在播，
+    自己的 TTS 被录进下一轮
+  - `{"type": "replaced"}`：服务端单活跃连接，本页被新页面顶替，应主动退场不再重连
+  - `{"type": "restarting"}` / `{"type": "error", "message": "..."}`
 
 ## 客户端支持
 
@@ -92,7 +115,8 @@ idle ─────────────> listening ────────
 
 - **技术栈**：原生 JS + AudioWorklet + WebSocket
 - **浏览器**：Safari 14.1+、Chrome 88+
-- **特性**：全双工、实时字幕、音色/语速选择
+- **特性**：半双工（thinking/speaking 停发麦克风帧）、实时字幕、打断按钮、音色/语速选择、
+  附件上传、拖拽投文件、断线自愈
 - **启动**：服务端自动托管，访问 `http://127.0.0.1:8698`
 
 ### 2. 微信小程序（`miniprogram/`）
@@ -125,54 +149,78 @@ idle ─────────────> listening ────────
 
 **配置文件**：`config.yaml`（复制 `config.yaml.example` 后修改）
 
-**关键配置项**（完整列表见 `server/config.py`）：
+**关键配置项**（完整列表见 `server/config.py`；下面按 example 口径写，行末 `▸线上` 是
+2026-09-19 核对的真实 `config.yaml` 差异）：
 
 ```yaml
 # 服务
-host: 127.0.0.1        # 手机接入时改 0.0.0.0
+host: 127.0.0.1        # ▸线上 0.0.0.0（手机走隧道要监听全网卡）
 port: 8698
 auth_token: ""         # 非空时 /ws 必须带 ?token=（改 0.0.0.0 时务必设置）
+                       # 只准写在 gitignore 的 config.yaml 里；0.4.7 起访问日志自动遮成 ***
 
 # Hermes gateway
 hermes_base_url: http://127.0.0.1:8647
-hermes_model: k3       # 实际使用 pool-deepseek-v4-flash
+hermes_model: k3       # 仅占位：实测网关不看 body.model，真正用的模型由 ~/.hermes/config.yaml
+                       # 的默认 provider 决定（当前 k3-256k）。换模型要改 Hermes 配置，改这里没用。
 
-# ASR
-asr_backend: auto      # auto | doubao | sherpa | whispercpp | faster
+# ASR（auto 的优先链：qwen 本地 sidecar > 豆包云端 > sherpa 本地流式 > whisper 批量）
+asr_backend: auto      # auto | qwen | doubao | sherpa | whispercpp | faster   ▸线上 doubao
 
 # TTS
-tts_voice: zh-CN-XiaoxiaoNeural
+tts_backend: auto      # auto=kokoro 本地优先、edge-tts 云端兜底 | kokoro | edge   ▸线上 edge
+tts_voice: zh-CN-XiaoxiaoNeural     # edge-tts 音色（kokoro 用 kokoro_voice）
 tts_rate: "+0%"
+tts_lookahead: 2       # 预合成句数。1 时句间容易断流（上一句播完下一句还没合成）→ 卡顿
+playback_grace_ms: 900 # 等客户端 playback_done 的余量（客户端预灌水位 120ms + 网络抖动）
 
 # VAD
 vad_threshold: 0.5           # listening 档阈值
 vad_end_silence_ms: 1100     # 尾静音判段结束（800 切碎思考停顿，2026-08-11 定 1100）
-barge_threshold: 0.85        # speaking 档打断阈值
-barge_hold_ms: 320           # 持续时长判打断
+barge_threshold: 0.85        # ⚠️ 半双工下这几个 barge_* 实际不参与决策（speaking 不处理
+barge_hold_ms: 320           #    上行帧，BargeDetector 只在 pre-roll 灌回时被顺带复位）
 ```
 
 ## 依赖管理
 
 **Python 环境**：`py3.13` + venv（`.venv/`）
 
-**ASR 三档（按优先级）：**
+**ASR 四档（`asr_backend: auto` 的优先链，实测启动日志即按此顺序探测）：**
 
-1. **doubaoime-asr**（云端，优先）
+1. **qwen3-asr 1.7B**（本地 sidecar，优先）
+   - 复用 weSaw 的 venv/脚本/权重（`asr_qwen_python` / `asr_qwen_server` / `asr_qwen_model`），
+     不在本仓库 pip 里
+   - 批量转写：一段话说完才出字，**无实时字幕**（选中它时 `asr_partial` 不会出现）
+   - 启动即后台预热（`asr_qwen_warm_at_boot`），否则首次说话要等模型加载；
+     `asr_qwen_idle_kill_min>0` 可空闲回收省内存（当前 0=常驻）
+
+2. **doubaoime-asr**（云端流式，次选）
    - 包：`doubaoime-asr`（PyPI）
    - 凭据：`~/.config/doubao-asr/credentials.json`
-   - 特点：实时流式，准确度高，需联网
+   - 实时流式、有字幕；**按 WS 连接各建一个实例**（共享单例会互相 reset，见 CHANGELOG 0.4.5）
 
-2. **sherpa-onnx**（本地流式，备胎）
+3. **sherpa-onnx 流式 paraformer**（本地流式，备胎）
    - 包：`sherpa-onnx`
    - 模型：`/Users/gao/clone/expression-trainer/models/sherpa-onnx-streaming-paraformer-bilingual-zh-en`
-   - 特点：RTF 0.03，边说边出字，与 expression-trainer 共用模型
+   - RTF 0.03，边说边出字，与 expression-trainer 共用模型
 
-3. **pywhispercpp**（本地批处理，兜底）
+4. **whisper.cpp / faster-whisper**（本地批处理，兜底）
    - 包：`pywhispercpp`
    - 模型：`models/ggml/ggml-large-v3-turbo-q5_0.bin`（547MB，Metal GPU）
-   - 特点：RTF 0.35，一字不差，首次启动自动下载
+     ▸线上 `asr_ggml_model: models/ggml/ggml-large-v3-q5_0.bin`（1080MB，2026-09-20 冒烟实测 Metal 加载）
+   - RTF 0.35，一字不差，首次启动自动下载；约 1s 转写延迟
+   - 兜底内部仍先试 whisper.cpp，**只有 `asr_backend: faster` 才跳过它**（0.4.7 修：此前钉 doubao/qwen
+     时会绕开本机 ggml 权重直接去拉 faster-whisper）；`models/faster-whisper-<档名>/model.bin` 完整时
+     按本地目录加载，不再走 hub 缓存重下
 
-**TTS**：edge-tts（免费微软音色）
+**TTS**：`auto` = kokoro 本地（`models/kokoro/kokoro-v1.1-zh.onnx`）优先、edge-tts 云端兜底；
+`kokoro` / `edge` 可强制。edge-tts 偶发失败时整句未出声会重试一次（半句失败不重试，会跳段）。
+
+> ⚠️ **线上 `config.yaml` 实配（2026-09-19 核对）：`asr_backend: doubao` + `tts_backend: edge`**。
+> 也就是说 qwen sidecar 与 kokoro 虽然代码在、权重在，当前进程**并未加载**（`pgrep -f qwenasr_server`
+> 为空属正常，不是崩溃）。想启用：改配置后 `scripts/restart-service.sh`，qwen 首启预热约 16s。
+> 顺带解释了进程看着"很轻"——本地大模型一个都没常驻，长期空闲的进程页还被 macOS 压缩换出了
+> （2026-09-20 实测 `ps -o rss` 只剩约 5MB；`ps` 的 VSZ 是地址空间保留，不是占用，别拿它判断）。
 
 **VAD**：silero（pysilero-vad）
 
@@ -186,7 +234,10 @@ barge_hold_ms: 320           # 持续时长判打断
 # 冒烟测试（健康检查 + edge-tts + 全链路）
 scripts/smoke.sh
 
-# 单元测试
+# 单元测试（43 项：分句器 / 会话协议时序 / 本轮修复 / 音频 worklet 仿真与变异）
+#   音频 worklet 在浏览器外跑不了，tests/worklet_sim.mjs 用假 AudioWorkletProcessor
+#   按渲染量子推进来测；小程序端 Player 是另一套实现，用假 WebAudio 上下文 + 假时钟
+#   跑它的排度/收口时序；pytest 负责调 node（没装 node 自动 skip）
 .venv/bin/python -m pytest tests/ -q
 
 # ASR 延迟基准
@@ -196,17 +247,24 @@ scripts/smoke.sh
 .venv/bin/python scripts/ws_regression.py
 ```
 
-## 性能指标（M1 Pro 16GB，2026-08-08）
+## 性能指标（M1 Pro 16GB）
+
+⚠️ 下表除注明外均为 2026-08-08 所测，**当时尚未发现跨案串历史**（见「会话身份」节），
+数字不能代表修好之后的实况。0.4.7 已于 2026-09-20 15:16 重启上线，重启后的实测见末两行。
 
 | 指标 | 结果 |
 |------|------|
-| **首包延迟** | 4.10s（ASR 1.0s + Hermes 3.2s + TTS 0.8s） |
-| **ASR RTF** | whisper.cpp turbo q5+Metal **0.35**（一字不差）<br>sherpa-onnx paraformer **0.03**（实时流式） |
+| **首包延迟** | 2026-08-08 记 4.10s（ASR 1.0s + Hermes 3.2s + TTS 0.8s）<br>2026-09-19 实测同一句话：干净会话首 delta **4.7s**；串上陈年历史后同轮 **11.8s**（prompt 11801 → 42771 token）<br>2026-09-19 23:14 手机端（旧进程、泄漏未修）：`[turn 1] ★首音 13.12s`、`[turn 2] 首delta 12.17s / ★首音 13.40s` |
+| **ASR RTF** | whisper.cpp turbo q5+Metal **0.35**（一字不差）<br>sherpa-onnx paraformer **0.03**（实时流式）<br>qwen3-asr 1.7B 热转写 **RTF≈0.29**；线上实配 doubao 云端，停口→ASR 0.2~4.2s（首轮建连慢） |
 | **TTS 合成** | 快于实时（3.8s 音频 1.7s 合成完） |
-| **内存占用** | whisper.cpp 常驻 ~0.7GB |
-| **WS 回归** | 9/9 通过（全事件序、打断、turn 递增） |
+| **内存占用** | 线上实配（doubao + edge）不常驻本地模型，空闲进程 RSS 仅约 5MB；whisper.cpp 档常驻 ~0.7GB，qwen3-asr sidecar 另算（MPS 独立进程，权重 4.4GB） |
+| **WS 回归** | `.venv/bin/python scripts/ws_regression.py`（需服务已启动）；离线单测 43 项（含协议回归 + 音频仿真 + 变异检查；仿真脚本 `node tests/worklet_sim.mjs` 自身 20 条断言：web 两个 worklet 跑在 Node `vm` 里的**真实** process()，小程序 Player 跑假 WebAudio + 假时钟） |
+| **WS 回归（2026-09-20 15:16，0.4.7 新进程 PID 96226）** | `scripts/ws_regression.py` **9/9 通过**：语音 turn 全事件序 ✓、打断后 turn 递增且迟到帧 0 ✓；本轮 `[turn 1] 停口→ASR 1.02s / 首delta 13.83s / ★首音 14.94s / 完 16.64s` |
+| **串历史修复的网关侧坐实（2026-09-20）** | 三条 hermes-live 会话全为 `hl-<uuid16>`、首话轮 `history=0`、`in=1178x` token（修复前同一场景被灌到 **42,771**）；同连接第二话轮 `history=2`、`in=12021` → **同一段对话仍然连续，不是改成失忆**。⚠️ 但首 delta 并没有因此变快：同时段 11.8k prompt 的 API `latency` 实测 12.7s / 15.2s，而凌晨 CLI 跑同量级 prompt 只要 4.5~5.2s —— 大头是 k3-256k 池子白天的抖动，不是历史体积。修历史只保证了"越聊越慢"不会再来 |
+| **冒烟（2026-09-20 01:04，含 0.4.7 修复的批量兜底路径）** | `scripts/smoke.sh` 4/4 通过，全程 **36s**：`cli.m0_pipeline --wav` → whisper.cpp 加载本地 `ggml-large-v3-q5_0.bin`（1080MB，MTL0）→ 停口→ASR **1.61s** → 首delta 7.25s → ★首音 8.70s。**修前**这一步是去 hf-mirror 重下 3 GB faster-whisper，7 分钟无进度后手杀（见 CHANGELOG 0.4.7）；⚠️ 走的是本机 CLI 直连，不经浏览器播放，故首音不含下行缓冲/预灌那部分时间 |
 
-**延迟大头**：Hermes 首 delta 3-4s（agent 大 prompt 预填充 + 池代理），会话变热后 3.9s→3.2s（前缀缓存）。
+**延迟大头**：Hermes 首 delta。旧结论"agent 大 prompt 预填充 + 池代理慢"只对了一半——
+真正放大它的是被内容指纹复活的历史会话；串历史修掉后，剩下的才是 prompt 体积本身。
 
 ## 开发规范
 
@@ -225,7 +283,8 @@ scripts/smoke.sh
 ### 分支策略
 
 - 主分支：`main`（直接开发，小项目无需 dev 分支）
-- 标签：每次小程序上传打 tag（如 `v0.4.4`）
+- 标签：每次小程序上传打 tag（如 `v0.4.7`）。⚠️ 2026-09-20 核对：本地仓库 `git tag` **为空**，
+  这条约定一直没落地，下次上传顺手补 `v0.4.7`
 
 ## 部署与运维
 
@@ -255,11 +314,17 @@ launchctl bootout gui/$(id -u)/com.gaochengbin.hermes-live
 
 ```bash
 # 上传代码
-node scripts/wx-upload.js 0.4.4 "增加重启服务按钮"
+node scripts/wx-upload.js 0.4.7 "说话中可打断 + 音频收口修复"
 
 # 登录微信公众平台设为体验版/提交审核
 # https://mp.weixin.qq.com
 ```
+
+⚠️ 0.4.7 + 0.4.8 的小程序端改动（打断按钮、socket 生命周期、`endTurn` turn 守卫、
+**同 turn `setTurn` 幂等**）**尚未上传**；仓库里查不到最后一次上传用的是哪个版本号（无 tag、无记录），
+以微信公众平台上的当前版本为准。
+服务端改动同理需重启才生效（0.4.8 待重启项：`Cache-Control: no-cache`、合成失败补发 `tts_end`、
+`closed` 后丢上行、`playback_done` 日志）。
 
 ### 远程重启（0.4.4+）
 
@@ -286,13 +351,41 @@ curl -X POST http://127.0.0.1:8698/api/restart \
 
 1. ~~doubao ASR 连接偶尔失败/空结果~~（2026-08-11 已修：根因是 app 级单例被多连接共享互踩 +
    空闲 ~40s 被豆包远端掐流；现按连接实例化 + VAD start 懒建连 + 单活跃连接 + 前端断线自愈）
-2. 首包延迟 4.1s，Hermes 首 delta 占 3.2s（agent prompt 大，网关池代理慢）
-3. edge-tts 偶尔被风控（概率低，备胎 `say -v Tingting` 可用）
-4. thinking/speaking 态半双工丢帧（Hermes 思考期说话被丢弃）——高律师 2026-08-11 定**不改**：
+2. ~~跨案串历史~~（2026-09-19 已修：不带 `X-Hermes-Session-Id` 时网关按
+   `sha256(system_prompt+首句)` 派生会话身份，固定开场白会复活陈年会话；现**每条 WS 连接**
+   铸造 `hl-<uuid16>`，「新会话」再轮换一次。
+   顺带解释了"首包延迟偶发 10s+"——被捞回的历史把 prompt 撑到 4 万 token）
+3. ~~语音卡顿 / 回答说到一半就断~~（2026-09-19 已修：`tts_lookahead` 1→2、播放 worklet 加
+   120ms 预灌水位、下行收口改由服务端 `tts_end` 触发而非客户端缓冲欠载猜测。
+   2026-09-20 15:16 已重启上线、`ws_regression.py` 9/9 通过；**真人试听仍待高律师手机确认**）
+   - **0.4.7 重启后紧接着出现「手机网页整场没声音」**，0.4.8 已定位并修好（详见 CHANGELOG）：
+     下行块从「预切缓冲」改成「整块 + offset」，而 `app.js` 与 worklet 分别缓存 → 新旧混合时
+     每块解成 0 个样本，**麦克风/ASR 全正常却一句不听**。现 worklet 容忍无 offset、
+     同 turn 重复 `setTurn` 幂等，另加 `Cache-Control: no-cache` 中间件堵住混合缓存这条路。
+     ⚠️ 前端 JS 改动已在盘上、由当前进程直接生效（实测 curl 到的字节与磁盘一致），
+     **重启只是为了让 `Cache-Control` 头生效**——这一条待高律师点头
+   - ⚠️ **仍未证实的部分**：以上是我用离线仿真能复现并修掉的机制，不等于他手机上那次静音的唯一成因
+     （设备侧复听还没回话）。为这条我补了 `playback_done` 的服务端日志——下次再静音，
+     日志会直接说明「客户端到底播没播」，而不是靠猜
+4. 首包延迟里仍有 Hermes prompt 体积本身的部分（干净会话首 delta ~4.7s）
+5. edge-tts 偶尔被风控（概率低，备胎 `say -v Tingting` 可用）
+6. thinking/speaking 态半双工丢帧（Hermes 思考期说话被丢弃）——高律师 2026-08-11 定**不改**：
    排队下一轮的方案经常出 bug，维持半双工
+7. **`auth_token` 已经外泄过，建议轮换**：两件事叠加
+   - 0.4.7 之前的访问日志把 `?token=…` 明文写进 `logs/service.log`（2026-09-19 的日志行即例），
+     现已遮罩成 `token=***`，但**旧日志里那份还在**（文件 gitignored，机器上谁都能读）
+   - 更要紧的：这个 token 曾**随仓库提交**——`git log -S` 命中 `eef9761`（0.3.2 内置默认 token）、
+     `44f7a4e`（0.4.5 又内置一次），到 `40b139b` 才移除。origin 是 GitHub 私有仓，
+     历史里的那份即使仓库私有也仍在，改历史代价大
+   → 干净的收口只有一条：**换一个新 token**（改 `config.yaml` → 重启 → 小程序设置与网页
+   `localStorage.hl_token` 重填），并清掉旧 `logs/service.log`。2026-09-20 核对，尚未执行
 
 ### 待办事项
 
+- [x] 0.4.7 重启上线（2026-09-20 15:16，PID 96226）+ `scripts/ws_regression.py` 9/9 已通过
+- [ ] 手机实听确认卡顿消失（只能真人耳朵判；半双工收口、预灌水位这些仿真测不出主观听感）
+- [ ] **轮换 `auth_token`**（见已知问题 7：它进过 git 历史，也进过 0.4.7 之前的明文访问日志），
+      与上一条一起做完：换 token → 重启 → 跑回归 → 清旧日志 → 手机/网页重填
 - [ ] 首包延迟优化（考虑 Hermes agent prompt 精简）
 - [ ] TTS 备胎方案完善（Piper 本地合成）
 - [ ] 小程序增加历史会话列表
@@ -303,3 +396,11 @@ curl -X POST http://127.0.0.1:8698/api/restart \
 - **开发者**：高城斌律师
 - **用途**：五邑律师事务所内部工具
 - **协议**：内部项目，未开源
+
+## 工作纪要
+
+### 2026-09-20 18:33 手机端「没有声音」二次复现与缓存破壁（Hermes）
+- 现象：17:42 重启（0.4.8 生效）后，18:27 高律师 iPhone Safari 测「在吗」——ASR 正常、服务端 metrics 报首音 4.20s，但**无 playback_done**，客户端全程无声。
+- 判定：服务端已在下发（首音有值），静音在客户端播放侧；指向 Safari 对 `addModule` 模块的启发式缓存——no-cache 响应头只在回源时生效，已装模块可直接复用旧实例（0.4.7 半新半旧错配的同类机制）。
+- 处置：`web/audio.js` 两个 worklet URL 与 `web/app.js`/`index.html` 引用统一加 `?v=0.4.8` 版本破壁（版本一变 URL 即变，无需用户清缓存）；18:33 重启服务，`/web/audio.js?v=0.4.8` 实测 200 + no-cache + 新代码在served。
+- **已验（18:42 高律师）：手机端恢复有声**——确认根因=客户端缓存旧 worklet；`?v=` 版本破壁后重开页面即好。屏上诊断计数（帧数/cv状态/P发R播）留存，状态行可见，下次再出问题一眼定位。

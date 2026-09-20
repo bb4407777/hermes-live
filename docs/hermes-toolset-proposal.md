@@ -1,10 +1,13 @@
 # 提案：给 api_server 平台配精简 toolset（压语音首字延迟）
 
-**状态：配置已落（2026-08-08 12:0x，0.20 升级完成后），待下次网关重启生效**。
-备份：`~/.qclaw-hermes/config.yaml.bak-20260808-toolsets`；已验 YAML 解析与结构完整；
-`terminal/delegation` 两名在 0.20 网关的 weixin 段生产在用 = 名字合法性已证。
-重启仍按红线归高律师择时会话外做；生效后跑 `scripts/ws_regression.py` 前后对比首 delta，
-并把「api_server=精简面」补进 hermes SKILL.md（定调双写在生效时点做，不提前）。
+**状态：提案已落地并生效**（2026-09-20 核对）。实际面比本提案更宽——
+`~/.hermes/config.yaml` 现为 `weixin` 与 `api_server` 各 `[terminal, delegation, file, memory]`
+（多了 `file`/`memory`），且配置目录已从提案里写的 `~/.qclaw-hermes/` 迁到 `~/.hermes/`。
+网关最近一次重启 2026-09-19 22:07，所以这份配置正在被用。
+
+⚠️ 本文件其余部分保留 08-08 当时的原话，其中两处已过期：① 路径 `~/.qclaw-hermes/config.yaml`；
+② "模型已是 pool-deepseek-v4-flash"（2026-09-19/20 复核为 **`k3-256k`**，`agent.log` 的
+`API call #N: model=k3-256k` 坐实）。备份文件 `config.yaml.bak-20260808-toolsets` 亦随目录迁移失效。
 
 ## 背景
 
