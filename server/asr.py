@@ -107,6 +107,9 @@ class DoubaoStreamingASR:
     后台 WebSocket 协程通信，不阻塞事件循环。
     """
 
+    # 话中重连上限：远端掐流后剩余语音进新会话继续转写，超限则静默丢帧
+    _MAX_RECONNECT = 3
+
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._available = False
@@ -117,6 +120,10 @@ class DoubaoStreamingASR:
         self._partial: str = ""
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._reconnects: int = 0     # 本轮已重连次数
+        self._dropped: int = 0        # 重连超限后累计丢帧数（降噪汇总用）
+        self._carried: str = ""       # 被掐死会话已识别的文本，接力进 finish()
+        self._last_error: str = ""    # 上一会话死因（重连日志用）
 
     def load(self) -> bool:
         if self.cfg.asr_backend not in ("auto", "doubao"):
@@ -145,6 +152,15 @@ class DoubaoStreamingASR:
         """
         if not self._available:
             return
+        self._reconnects = 0
+        self._dropped = 0
+        self._carried = ""
+        self._last_error = ""
+        self._start_session()
+
+    def _start_session(self) -> None:
+        """建一个新的后台 WebSocket 会话（新话轮或话中重连共用）。
+        队列/future 以局部变量捕获进 task 闭包，旧 task 迟到结果不窜轮。"""
         loop = asyncio.get_event_loop()
         self._loop = loop
         queue: asyncio.Queue = asyncio.Queue()
@@ -152,7 +168,8 @@ class DoubaoStreamingASR:
         self._pcm_queue = queue
         self._result_future = future
         self._partial = ""
-        logger.info("doubao start_turn: launching background session task")
+        logger.info("doubao: launching background session task (reconnect #%d)",
+                    self._reconnects)
         self._task = loop.create_task(self._run_session(queue, future))
 
     async def _run_session(self, queue: asyncio.Queue, future: asyncio.Future) -> None:
@@ -178,9 +195,11 @@ class DoubaoStreamingASR:
                     final_text = resp.text
                     logger.info("doubao final: %r", final_text[:80])
                 elif resp.type.name == "ERROR":
+                    self._last_error = str(resp.error_msg)
                     logger.warning("doubao ASR 错误：%s", resp.error_msg)
                     break
         except Exception as e:
+            self._last_error = str(e)
             logger.warning("doubao ASR 会话异常：%s", e, exc_info=True)
         finally:
             if not future.done():
@@ -192,10 +211,29 @@ class DoubaoStreamingASR:
         if not self._available or self._pcm_queue is None:
             return ""
         if self._task is not None and self._task.done():
-            # 远端掐流/异常后台已死（如 40s 无语音被服务端断开）：本轮作废，
-            # 由 finish() 取已落定的结果，调用方 reset 后下一轮重建会话。
-            logger.warning("doubao feed: 后台会话已结束，丢弃本帧")
-            return self._partial
+            # 远端掐流/异常后台已死：旧实现每帧打 WARNING 刷屏（单日数千条）
+            # 且此后语音全丢 → 用户侧「说完没反应」。现在话中自动重连，
+            # 已识别文本接力进 _carried，本帧直接喂进新会话。
+            if self._reconnects < self._MAX_RECONNECT and self._loop is not None:
+                if self._result_future is not None and self._result_future.done():
+                    try:
+                        seg = (self._result_future.result() or "").strip()
+                    except Exception:
+                        seg = ""
+                    seg = seg or self._partial.strip()
+                    if seg:
+                        self._carried = f"{self._carried} {seg}".strip()
+                self._reconnects += 1
+                logger.warning("doubao feed: 后台会话已死（%s），第 %d/%d 次话中重连",
+                               self._last_error or "远端掐流",
+                               self._reconnects, self._MAX_RECONNECT)
+                self._start_session()
+            else:
+                self._dropped += 1
+                if self._dropped % 200 == 1:
+                    logger.warning("doubao feed: 重连已达上限，静默丢帧"
+                                   "（本轮累计 %d 帧）", self._dropped)
+                return self._partial
         self._pcm_queue.put_nowait(pcm16)
         return self._partial
 
@@ -204,14 +242,15 @@ class DoubaoStreamingASR:
         if not self._available or self._pcm_queue is None:
             return ""
         self._pcm_queue.put_nowait(None)   # 关闭音频流
+        text = ""
         if self._result_future:
             try:
-                text = await asyncio.wait_for(self._result_future, timeout=8.0)
-                return text.strip()
+                text = (await asyncio.wait_for(self._result_future, timeout=8.0)).strip()
             except asyncio.TimeoutError:
                 logger.warning("doubao ASR 超时，返回中间结果：%r", self._partial)
-                return self._partial.strip()
-        return ""
+                text = self._partial.strip()
+        # 拼接话中重连前已识别的段落
+        return f"{self._carried} {text}".strip() if self._carried else text
 
     def get_partial(self) -> str:
         return self._partial
@@ -223,6 +262,10 @@ class DoubaoStreamingASR:
         self._pcm_queue = None
         self._result_future = None
         self._partial = ""
+        self._reconnects = 0
+        self._dropped = 0
+        self._carried = ""
+        self._last_error = ""
 
     @property
     def available(self) -> bool:
