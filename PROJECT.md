@@ -10,11 +10,12 @@
 - **部署**：launchd 常驻（`com.gaochengbin.hermes-live`，KeepAlive，高律师 2026-08-11 定：
   doubao 云端模式内存占用小，非常驻则 Mac 重启后隧道活着、8698 死，手机 502）
 - **对话后端桥**（2026-10-05 起）：launchd 常驻 `com.gaochengbin.hermes-live-acp-bridge`
-  （`server/acp_bridge.py`），监听 127.0.0.1:8647 顶替退役 Hermes gateway 的插槽，引擎=
-  中枢同款主版 CodeBuddy CLI + deepseek-v4.1-flash（spawn 参数对齐 ~/.cc-connect/config.toml）
+  （`server/acp_bridge.py`），监听 127.0.0.1:8647 顶替退役 Hermes gateway 的插槽。引擎=
+  中枢同款主版 CodeBuddy CLI（spawn 参数对齐 ~/.cc-connect/config.toml），模型跟
+  config.yaml `acp_model`（当前 glm-5.3-flash，2026-10-05 高律师定；初始为 deepseek-v4.1-flash）
 - **后端沿革**：Hermes gateway（~2026-10-02 退役）→ 中枢通版 CodeBuddy 经 ACP 桥
-  （2026-10-05 高律师定「转为中枢通版CodeBuddy的DeepSeek」）。hermes-live 本体零改动：
-  每轮现发 POST、无缓存状态，桥在即自愈，主服务无需重启
+  （2026-10-05 高律师定「转为中枢通版CodeBuddy的DeepSeek」，同日改「改glm5.3flash模型」）。
+  hermes-live 本体零改动：每轮现发 POST、无缓存状态，桥在即自愈，主服务无需重启
 
 ## 技术架构
 

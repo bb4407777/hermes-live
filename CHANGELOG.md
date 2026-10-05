@@ -26,6 +26,10 @@
   见标记等「A：/答：」后剥前缀，200 字兜底防卡死。
 
 ### Changed
+- **对话模型可配置化**：新增 config.yaml 键 `acp_model`（代码默认 deepseek-v4.1-flash →
+  config.yaml → env ACP_BRIDGE_MODEL 覆盖），换模型改一行配置重启桥即可，不再动代码。
+  2026-10-05 高律师定「改glm5.3flash模型」：当前值 glm-5.3-flash（主版 CLI 探针实测通过，
+  10-02 曾记录的「主版+GLM 401」已不复现）。
 - 版本号 0.4.9（重启后 /api/health 生效）；main.py/PROJECT.md 的 gateway 表述改 ACP 桥。
 
 ### Notes

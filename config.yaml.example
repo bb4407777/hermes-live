@@ -18,3 +18,5 @@
 # vad_threshold: 0.5       # listening 档语音概率阈值（barge_* 在半双工下不参与决策，先别调）
 # vad_end_silence_ms: 1100 # 尾静音判段结束。800 会把"那个…"这类思考停顿切成单独一轮（2026-08-11 定 1100）
 # voice_system_prompt: 自定义语音风格提示……
+# acp_model: deepseek-v4.1-flash  # 对话模型（ACP 桥读此值 spawn CodeBuddy CLI；改完重启桥生效）
+                                   # 可选值见 codebuddy --help --model 菜单   ▸线上 glm-5.3-flash

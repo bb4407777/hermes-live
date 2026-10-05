@@ -49,12 +49,12 @@ log = logging.getLogger("acp_bridge")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# spawn 参数对齐 ~/.cc-connect/config.toml 的中枢引擎（2026-10-05 主版 CLI + deepseek-v4.1-flash）
+# spawn 参数对齐 ~/.cc-connect/config.toml 的中枢引擎；模型三档来源：
+# 代码默认 → config.yaml acp_model → env ACP_BRIDGE_MODEL 覆盖（换模型改 config.yaml 即可）
 CLI = os.environ.get(
     "ACP_BRIDGE_CLI",
     "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
 )
-MODEL = os.environ.get("ACP_BRIDGE_MODEL", "deepseek-v4.1-flash")
 MCP_CONFIG = os.environ.get(
     "ACP_BRIDGE_MCP_CONFIG", os.path.expanduser("~/.cc-connect/wai-mcp.json")
 )
@@ -68,6 +68,22 @@ PORT = int(os.environ.get("ACP_BRIDGE_PORT", "8647"))
 DROP_UPDATES = {"agent_thought_chunk"}
 # 转发为 hermes.tool.progress 的更新（hermes_live session.py 消费 tool/label/emoji/status 四字段）
 TOOL_UPDATES = {"tool_call", "tool_call_update"}
+
+
+def load_acp_model() -> str:
+    """对话模型：代码默认 → config.yaml acp_model → env ACP_BRIDGE_MODEL 覆盖。
+    2026-10-05 高律师定「改glm5.3flash模型」（原话），此前为中枢同款 deepseek-v4.1-flash。"""
+    model = "deepseek-v4.1-flash"
+    try:
+        data = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+        if str(data.get("acp_model") or "").strip():
+            model = str(data["acp_model"]).strip()
+    except Exception as e:  # noqa: BLE001 — 读不到用默认，桥不能因它起不来
+        log.warning("acp_model 读取失败（%s），用默认 %s", e, model)
+    env = os.environ.get("ACP_BRIDGE_MODEL")
+    if env:
+        model = env
+    return model
 
 
 def load_voice_system_prompt() -> str:
@@ -117,9 +133,9 @@ class ACPChild:
     def alive(self) -> bool:
         return self.proc is not None and self.proc.returncode is None
 
-    async def start(self) -> None:
+    async def start(self, model: str) -> None:
         args = [
-            CLI, "--acp", "--model", MODEL,
+            CLI, "--acp", "--model", model,
             "--permission-mode", "bypassPermissions",
             # 摘掉 user 层设置源：屏蔽 ~/.claude/CLAUDE.md（软链 vault 章程）全局自动加载，
             # 否则语音每轮先念「Q：…」再答（章程 Q/A 红线是给微信同事岗的，不是给语音的）。
@@ -154,17 +170,17 @@ class ACPChild:
             except ProcessLookupError:
                 pass
 
-    async def ensure_alive(self) -> None:
+    async def ensure_alive(self, model: str) -> None:
         if self.alive:
             return
         if self.proc is None:
-            log.info("首次拉起 CLI 子进程")
+            log.info("首次拉起 CLI 子进程（model=%s）", model)
         else:
             log.warning("CLI 子进程已死（returncode=%s），重拉", self.proc.returncode)
         self.pending.clear()
         self.subs.clear()
         self.warm_session = None
-        await self.start()
+        await self.start(model)
 
     # ── 线协议 ────────────────────────────────────────────────
 
@@ -296,6 +312,7 @@ class HeadScrub:
 class Bridge:
     def __init__(self) -> None:
         self.child = ACPChild()
+        self.model = load_acp_model()
         # hl-xxx（hermes-live 自铸会话身份）→ ACP sessionId
         self.sessions: dict[str, str] = {}
         self.turn_lock = asyncio.Lock()  # 半双工：同一时刻只跑一轮模型
@@ -314,7 +331,7 @@ class Bridge:
 
     async def health(self, _request: web.Request) -> web.Response:
         if self.child.alive:
-            return web.json_response({"ok": True, "engine": MODEL})
+            return web.json_response({"ok": True, "engine": self.model})
         return web.json_response({"ok": False}, status=503)
 
     async def chat(self, request: web.Request) -> web.StreamResponse:
@@ -353,13 +370,13 @@ class Bridge:
 
         def chunk(delta: dict, finish: str | None = None) -> dict:
             return {
-                "id": cid, "object": "chat.completion.chunk", "created": 0, "model": MODEL,
+                "id": cid, "object": "chat.completion.chunk", "created": 0, "model": self.model,
                 "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
             }
 
         try:
             async with self.turn_lock:
-                await self.child.ensure_alive()
+                await self.child.ensure_alive(self.model)
                 acp_sid = await self._acp_session_for(hl_id)
                 await resp.write(sse(chunk({"role": "assistant", "content": ""})))
                 scrub = HeadScrub()
@@ -409,7 +426,7 @@ async def amain() -> None:
     bridge = Bridge()
 
     async def on_start(_app: web.Application) -> None:
-        await bridge.child.ensure_alive()
+        await bridge.child.ensure_alive(bridge.model)
 
     async def on_cleanup(_app: web.Application) -> None:
         bridge.child.kill()
@@ -418,7 +435,7 @@ async def amain() -> None:
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/v1/health", bridge.health)
     app.router.add_post("/v1/chat/completions", bridge.chat)
-    log.info("acp_bridge 监听 %s:%s（顶替退役 Hermes gateway 的 8647 插槽，引擎=%s）", HOST, PORT, MODEL)
+    log.info("acp_bridge 监听 %s:%s（顶替退役 Hermes gateway 的 8647 插槽，引擎=%s）", HOST, PORT, bridge.model)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, HOST, PORT)
