@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- hermes-live ACP 桥常驻：顶替退役 Hermes gateway 的 8647 插槽，
+       把 hermes-live 的 OpenAI 兼容请求翻译成中枢同款 CodeBuddy CLI（ACP）调用。
+       2026-10-05 高律师定「hermes-live 后端转为中枢通版 CodeBuddy 的 DeepSeek」。
+       安装：cp 到 ~/Library/LaunchAgents/ 后
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gaochengbin.hermes-live-acp-bridge.plist
+       注意：8647 被本桥专用；hermes-live 主服务（8698）无需感知本桥，health 每次现查。 -->
+  <key>Label</key>
+  <string>com.gaochengbin.hermes-live-acp-bridge</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/gao/Code/hermes-live</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gao/Code/hermes-live/.venv/bin/python</string>
+    <string>-m</string>
+    <string>server.acp_bridge</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- HOME 必须显式给（launchd 环境缺省教训同款）；CLI 登录态随 HOME 解析 -->
+    <key>HOME</key>
+    <string>/Users/gao</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/gao/Code/hermes-live/logs/acp-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/gao/Code/hermes-live/logs/acp-bridge.log</string>
+</dict>
+</plist>

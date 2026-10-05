@@ -9,6 +9,12 @@
 - **仓库**：`ssh://git@ssh.github.com:443/bb4407777/hermes-live.git`
 - **部署**：launchd 常驻（`com.gaochengbin.hermes-live`，KeepAlive，高律师 2026-08-11 定：
   doubao 云端模式内存占用小，非常驻则 Mac 重启后隧道活着、8698 死，手机 502）
+- **对话后端桥**（2026-10-05 起）：launchd 常驻 `com.gaochengbin.hermes-live-acp-bridge`
+  （`server/acp_bridge.py`），监听 127.0.0.1:8647 顶替退役 Hermes gateway 的插槽，引擎=
+  中枢同款主版 CodeBuddy CLI + deepseek-v4.1-flash（spawn 参数对齐 ~/.cc-connect/config.toml）
+- **后端沿革**：Hermes gateway（~2026-10-02 退役）→ 中枢通版 CodeBuddy 经 ACP 桥
+  （2026-10-05 高律师定「转为中枢通版CodeBuddy的DeepSeek」）。hermes-live 本体零改动：
+  每轮现发 POST、无缓存状态，桥在即自愈，主服务无需重启
 
 ## 技术架构
 
@@ -24,7 +30,8 @@
     │   ├─ doubaoime-asr（云端流式，次选）
     │   ├─ sherpa-onnx（本地流式，备胎）
     │   └─ pywhispercpp（本地批处理，兜底）
-    ├─ Hermes gateway 对话 (8647 /v1/chat/completions)
+    ├─ 对话后端（2026-10-05 起）：ACP 桥（server/acp_bridge.py，launchd 常驻，8647）
+    │   └─ 中枢同款 CodeBuddy 主版 CLI（ACP stdio，deepseek-v4.1-flash + hindsight MCP）
     ├─ 中文分句 (server/sentencer.py)
     └─ edge-tts 合成 (server/tts.py)
     ↓ 音频帧流回客户端
@@ -58,6 +65,10 @@
   会继续播放上一轮的残留音频。
 - **`/api/health` 不回显 session id**（该端点不鉴权，属外部可读信息）；只经 WS 的 `hello`
   发给已鉴权的连接。
+- **2026-10-05 起语义（ACP 桥）**：hl- 会话 id 由桥映射为 CLI 的 ACP sessionId（首见即建，
+  含启动预热的一个空会话免首轮冷启动）；同一 hl- 跨 WS 重连保持上下文，点「新会话」换新
+  ACP 会话，桥/CLI 重启则映射清空、各 hl- 重新开新会话（上下文清零）。CLI 以
+  `--no-session-persistence` 跑，语音会话不落盘。
 
 ### 状态机
 

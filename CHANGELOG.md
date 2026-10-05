@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.9] - 2026-10-05
+
+> 对话后端从已退役的 Hermes gateway 转为**中枢同款引擎**。10-02 网关退役后 8647 无人监听，
+> 语音助手「能听会说没脑子」三天（health 回 hermes:false，日志持续 UNREACHABLE）。
+> 高律师 2026-10-05 定「转为中枢通版 CodeBuddy 的 DeepSeek」（原话）。
+> 本版改动全部在新增的桥 + 文档；hermes-live 本体协议零改动，主服务无需重启即自愈。
+
+### Added
+- **`server/acp_bridge.py`：ACP→OpenAI 兼容桥**，launchd 常驻
+  （`com.gaochengbin.hermes-live-acp-bridge`，plist 在 `scripts/launchd/`），监听
+  127.0.0.1:8647 顶替退役 gateway 的插槽。把 `hermes_client.py` 的 OpenAI SSE 翻译成
+  ACP session/prompt：spawn 参数对齐 ~/.cc-connect/config.toml 的中枢引擎
+  （主版 WorkBuddy CLI + `--model deepseek-v4.1-flash` + hindsight MCP + bypassPermissions）；
+  思考流（agent_thought_chunk）整条丢弃防语音念出思考；工具更新转
+  `hermes.tool.progress` 事件（tool_buffer_text/工具面板语义不变）；客户端断开（语音打断）
+  发 `session/cancel`，对齐原 gateway 的 interrupt 语义；hl- 会话 id 映射为 ACP sessionId
+  （首见即建 + 启动预热一个空会话，免首轮 ~10s 的 session/new 冷启动）；
+  `--no-session-persistence`，语音会话不落盘。
+- **Q/A 头部回声剥除（HeadScrub）**：CLI 全局自动加载章程 CLAUDE.md
+  （`~/.claude/CLAUDE.md` 软链 vault 真身，`--setting-sources` 摘 user 层拦不住；
+  HOME shim 隔离实测不可行——登录态跟 HOME 走，报 Authentication required），
+  「回话必带 Q/A」文字岗红线渗进语音（实测回复变「Q：复述问题A：正文」）。
+  追加系统提示词禁言条款 + 桥内确定性缓冲剥除双保险：未见标记 40 字即放行，
+  见标记等「A：/答：」后剥前缀，200 字兜底防卡死。
+
+### Changed
+- 版本号 0.4.9（重启后 /api/health 生效）；main.py/PROJECT.md 的 gateway 表述改 ACP 桥。
+
+### Notes
+- hermes-live 本体无需重启：每轮现发 POST、无缓存状态，桥在即自愈（实测 health 自动翻绿）。
+- 章程上下文仍在模型可见范围内（隔离成本高于收益，角色定位「法律事务助理」反而对路），
+  格式泄漏由 HeadScrub 确定性兜底。
+- 要收工具面：桥 spawn 参数删 `--mcp-config` 或加 `--tools ""`（acp_bridge.py 顶部注释）。
+
 ## [0.4.8] - 2026-09-20
 
 > 0.4.7 重启后高律师手机网页端「没有声音」的回归修复。方向与一开始的猜测相反：

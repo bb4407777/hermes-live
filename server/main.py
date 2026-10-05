@@ -2,7 +2,7 @@
 
     .venv/bin/python -m server.main [--config config.yaml] [--port 8698] [--no-preload]
 
-只读依赖本机 Hermes gateway(8647)；绝不重启/修改 gateway，不碰 state.db。
+只读依赖本机 ACP 桥（8647，server/acp_bridge.py，后端=中枢同款 CodeBuddy CLI）；绝不重启/修改桥子进程。
 """
 
 from __future__ import annotations
