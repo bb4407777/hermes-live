@@ -141,6 +141,7 @@ class ACPChild:
         self.pending: dict[int, asyncio.Future] = {}
         # sessionId → 订阅该会话更新的 asyncio.Queue（当前半双工，同一时刻最多一个在订）
         self.subs: dict[str, asyncio.Queue] = {}
+        self.exited: asyncio.Event = asyncio.Event()  # 进程退出信号（话轮中死亡立刻上抛）
         self._lock = asyncio.Lock()
         self._next_id = 1
         self.warm_session: str | None = None  # 启动时预热好的空会话，首个 hl-id 直接认领
@@ -172,6 +173,7 @@ class ACPChild:
             stderr=asyncio.subprocess.DEVNULL,  # CLI 自身日志噪音大，枢纽侧不掺和
             start_new_session=True,             # 收尾时按进程组杀，防孤儿（与中枢薄桥同款关切）
         )
+        self.exited.clear()
         asyncio.create_task(self._reader())
         await self._request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, timeout=60)
         # 预热一个空会话：冷启动 session/new 实测约 10s，语音第一轮不该垫进去
@@ -188,9 +190,11 @@ class ACPChild:
             except ProcessLookupError:
                 pass
 
-    async def ensure_alive(self, cli: str, model: str) -> None:
+    async def ensure_alive(self, cli: str, model: str) -> bool:
+        """活着返回 False；(re)拉起返回 True——调用方必须同步清空 hl→ACP 会话映射，
+        否则旧映射指向已死进程里的会话，该 hl-id 每轮 prompt 都报错。"""
         if self.alive:
-            return
+            return False
         if self.proc is None:
             log.info("首次拉起 CLI 子进程（cli=%s model=%s）",
                      "AI版" if "WorkBuddy AI" in cli else "主版", model)
@@ -200,6 +204,7 @@ class ACPChild:
         self.subs.clear()
         self.warm_session = None
         await self.start(cli, model)
+        return True
 
     # ── 线协议 ────────────────────────────────────────────────
 
@@ -228,6 +233,11 @@ class ACPChild:
                     q.put_nowait(params.get("update") or {})
             # 其余 method（session/request_permission 等）在 bypassPermissions 下不应出现，忽略
         log.warning("CLI stdout 关闭（进程退出）")
+        self.exited.set()
+        # 立即唤醒所有还在等响应的调用方（话轮中死亡不等 600s 超时）
+        for fut in self.pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("CLI 进程退出"))
 
     async def _request(self, method: str, params: dict, timeout: float = 120) -> dict:
         assert self.proc and self.proc.stdin
@@ -240,7 +250,19 @@ class ACPChild:
                               ensure_ascii=False)
             self.proc.stdin.write(line.encode("utf-8") + b"\n")
             await self.proc.stdin.drain()
-        return await asyncio.wait_for(fut, timeout=timeout)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self.pending.pop(rid, None)   # 取消/超时也摘条目（打断路径曾悬空泄漏）
+
+    async def _notify(self, method: str, params: dict) -> None:
+        """ACP 通知（无 id、无响应，如 session/cancel）。发了就走，绝不等待。"""
+        assert self.proc and self.proc.stdin
+        async with self._lock:
+            line = json.dumps({"jsonrpc": "2.0", "method": method, "params": params},
+                              ensure_ascii=False)
+            self.proc.stdin.write(line.encode("utf-8") + b"\n")
+            await self.proc.stdin.drain()
 
     async def new_session(self, timeout: float = 60) -> str:
         res = await self._request("session/new", {"cwd": CWD, "mcpServers": []}, timeout=timeout)
@@ -248,7 +270,7 @@ class ACPChild:
 
     async def prompt_stream(self, session_id: str, text: str):
         """发起一轮 prompt，yield 更新 dict，直到收到 session/prompt 的 RESP。
-        取消消费方（客户端断开）→ 自动 session/cancel 对应会话。"""
+        取消消费方（客户端断开）→ 发 session/cancel（ACP 通知，无响应，对齐 gateway interrupt）。"""
         q: asyncio.Queue = asyncio.Queue()
         self.subs[session_id] = q
         task = asyncio.create_task(
@@ -256,10 +278,15 @@ class ACPChild:
                           {"sessionId": session_id, "prompt": [{"type": "text", "text": text}]},
                           timeout=600)
         )
+        exit_task = asyncio.create_task(self.exited.wait())
+        get_task: asyncio.Task | None = None
         try:
             while True:
                 get_task = asyncio.create_task(q.get())
-                done, _ = await asyncio.wait({task, get_task}, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait({task, get_task, exit_task},
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if exit_task in done and task not in done:
+                    raise RuntimeError("CLI 子进程在话轮中退出")
                 if get_task in done:
                     yield get_task.result()
                     get_task = None
@@ -268,11 +295,13 @@ class ACPChild:
             result = task.result()
             yield {"_stopReason": result.get("stopReason", "end_turn")}
         finally:
+            for t in (get_task, exit_task):
+                if t is not None and not t.done():
+                    t.cancel()   # 孤儿 q.get() 曾每个话轮漏一个，常驻进程里累积
             if task and not task.done():
                 task.cancel()
-                # 语音打断：明确 cancel 该 ACP 会话，防 CLI 继续烧 token（对齐 gateway interrupt）
                 try:
-                    await self._request("session/cancel", {"sessionId": session_id}, timeout=5)
+                    await self._notify("session/cancel", {"sessionId": session_id})
                 except Exception:  # noqa: BLE001
                     pass
             self.subs.pop(session_id, None)
@@ -282,16 +311,18 @@ class HeadScrub:
     """剥除章程 Q/A 泄漏的头部回声。
 
     背景：CLI 全局自动加载章程 CLAUDE.md（软链 vault 真身），「回话必带 Q/A」是给微信
-    文字岗的红线，语音场景模型偶尔仍以「Q：<复述问题>A：<正文>」开头（追加提示词的
-    禁言条款 2026-10-05 实测大部分压制但不彻底，E2E 仍抽到一次「A：」头）。语音播报
-    必须确定性干净，故在桥内缓冲开头若干字符：未见标记即放行；见「Q：/问：」等标记
-    则等「A：/答：」出现后剥掉前缀再放行，超长兜底放行防卡死。
+    文字岗的红线，语音场景模型偶尔仍以「Q：<复述问题>A：<正文>」或直接「A：<正文>」开头
+    （追加提示词禁言条款大部分压制但不彻底，E2E 抽样仍会漏）。语音播报必须确定性干净，
+    故在桥内缓冲开头：无任何标记满 HOLD 字即放行；见「答」段标记仅两种模式剥——其前有
+    Q/问（回声模式）或答段几乎在开头（纯 A 前缀）；答段在句中且无 Q 前导（「方案A：…」）
+    判为正文整段放行防误杀；有 Q 无答超 CAP 放弃剥除防卡死。
     """
 
     MARKERS = ("Q：", "Q:", "问：")
     ANSWERS = ("A：", "A:", "答：")
     HOLD = 40    # 无任何标记时的放行阈值（字）：语音首句延迟敏感，不宜大
-    CAP = 200    # 见标记但迟迟无「答」段的兜底放行阈值
+    PREFIX = 2   # 「答」段标记判为前缀式泄漏的最大位置（字），实测泄漏均为 idx=0
+    CAP = 400    # 有 Q 标记但迟迟无「答」段的兜底放行阈值（长问题回声可超 200 字）
 
     def __init__(self) -> None:
         self.buf = ""
@@ -308,15 +339,24 @@ class HeadScrub:
                 out, self.buf = self.buf, ""
                 return out
             return ""
-        for m in self.ANSWERS:
-            idx = self.buf.find(m)
-            if idx >= 0:
+        hit = min(((self.buf.find(m), m) for m in self.ANSWERS if self.buf.find(m) >= 0),
+                  default=None)
+        if hit is not None:
+            idx, marker = hit
+            has_q_before = any(0 <= self.buf.find(qm) < idx for qm in self.MARKERS)
+            if has_q_before or idx <= self.PREFIX:
                 self.done = True
                 self.stripped = True
-                rest = self.buf[idx + len(m):]
-                log.info("剥除 Q/A 头部回声（章程泄漏）: %.80s", self.buf)
+                rest = self.buf[idx + len(marker):]
+                echo_snapshot = self.buf
+                self.buf = ""   # 必须清空：句尾 flush 会把已剥掉的回声再补发一遍（测试钉住）
+                log.info("剥除 Q/A 头部回声（章程泄漏）: %.80s", echo_snapshot)
                 return rest.lstrip("：: \n　")
-        if len(self.buf) > self.CAP:
+            # 答段标记在句中且无 Q 前导（如「方案A：…」）→ 正文不是回声，整段放行防误杀
+            self.done = True
+            out, self.buf = self.buf, ""
+            return out
+        if len(self.buf) > self.CAP:   # 只有 Q 标记迟迟无答段：超长放弃剥除防卡死
             self.done = True
             out, self.buf = self.buf, ""
             return out
@@ -396,7 +436,9 @@ class Bridge:
 
         try:
             async with self.turn_lock:
-                await self.child.ensure_alive(self.cli, self.model)
+                if await self.child.ensure_alive(self.cli, self.model):
+                    # CLI 重拉后旧 ACP 会话全部失效，不清映射该 hl-id 每轮都对死会话发 prompt
+                    self.sessions.clear()
                 acp_sid = await self._acp_session_for(hl_id)
                 await resp.write(sse(chunk({"role": "assistant", "content": ""})))
                 scrub = HeadScrub()
@@ -446,7 +488,8 @@ async def amain() -> None:
     bridge = Bridge()
 
     async def on_start(_app: web.Application) -> None:
-        await bridge.child.ensure_alive(bridge.cli, bridge.model)
+        if await bridge.child.ensure_alive(bridge.cli, bridge.model):
+            bridge.sessions.clear()
 
     async def on_cleanup(_app: web.Application) -> None:
         bridge.child.kill()
