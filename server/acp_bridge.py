@@ -49,12 +49,14 @@ log = logging.getLogger("acp_bridge")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# spawn 参数对齐 ~/.cc-connect/config.toml 的中枢引擎；模型三档来源：
-# 代码默认 → config.yaml acp_model → env ACP_BRIDGE_MODEL 覆盖（换模型改 config.yaml 即可）
-CLI = os.environ.get(
-    "ACP_BRIDGE_CLI",
-    "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
-)
+# spawn 参数对齐 ~/.cc-connect/config.toml 的中枢引擎形态；CLI 与模型三档来源：
+# 代码默认 → config.yaml acp_cli/acp_model → env ACP_BRIDGE_CLI/ACP_BRIDGE_MODEL 覆盖。
+# CLI 两家：主版=WorkBuddy.app（copilot.tencent.com）、AI 版=WorkBuddy AI.app（workbuddy.ai），
+# 凭据独立（同一 binary 家族，--model 的合法值两家菜单不同，换家时先探针）。
+MAIN_CLI = ("/Applications/WorkBuddy.app/Contents/Resources/"
+            "app.asar.unpacked/cli/bin/codebuddy")
+AI_CLI = ("/Applications/WorkBuddy AI.app/Contents/Resources/"
+          "app.asar.unpacked/cli/bin/codebuddy")
 MCP_CONFIG = os.environ.get(
     "ACP_BRIDGE_MCP_CONFIG", os.path.expanduser("~/.cc-connect/wai-mcp.json")
 )
@@ -68,6 +70,22 @@ PORT = int(os.environ.get("ACP_BRIDGE_PORT", "8647"))
 DROP_UPDATES = {"agent_thought_chunk"}
 # 转发为 hermes.tool.progress 的更新（hermes_live session.py 消费 tool/label/emoji/status 四字段）
 TOOL_UPDATES = {"tool_call", "tool_call_update"}
+
+
+def load_acp_cli() -> str:
+    """CLI 二进制：代码默认主版 → config.yaml acp_cli → env ACP_BRIDGE_MODEL 同款三档。
+    2026-10-05 高律师定「换回ai版ds」：线上=AI 版（WorkBuddy AI.app）。"""
+    cli = MAIN_CLI
+    try:
+        data = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+        if str(data.get("acp_cli") or "").strip():
+            cli = str(data["acp_cli"]).strip()
+    except Exception as e:  # noqa: BLE001
+        log.warning("acp_cli 读取失败（%s），用默认主版", e)
+    env = os.environ.get("ACP_BRIDGE_CLI")
+    if env:
+        cli = env
+    return cli
 
 
 def load_acp_model() -> str:
@@ -133,9 +151,9 @@ class ACPChild:
     def alive(self) -> bool:
         return self.proc is not None and self.proc.returncode is None
 
-    async def start(self, model: str) -> None:
+    async def start(self, cli: str, model: str) -> None:
         args = [
-            CLI, "--acp", "--model", model,
+            cli, "--acp", "--model", model,
             "--permission-mode", "bypassPermissions",
             # 摘掉 user 层设置源：屏蔽 ~/.claude/CLAUDE.md（软链 vault 章程）全局自动加载，
             # 否则语音每轮先念「Q：…」再答（章程 Q/A 红线是给微信同事岗的，不是给语音的）。
@@ -170,17 +188,18 @@ class ACPChild:
             except ProcessLookupError:
                 pass
 
-    async def ensure_alive(self, model: str) -> None:
+    async def ensure_alive(self, cli: str, model: str) -> None:
         if self.alive:
             return
         if self.proc is None:
-            log.info("首次拉起 CLI 子进程（model=%s）", model)
+            log.info("首次拉起 CLI 子进程（cli=%s model=%s）",
+                     "AI版" if "WorkBuddy AI" in cli else "主版", model)
         else:
             log.warning("CLI 子进程已死（returncode=%s），重拉", self.proc.returncode)
         self.pending.clear()
         self.subs.clear()
         self.warm_session = None
-        await self.start(model)
+        await self.start(cli, model)
 
     # ── 线协议 ────────────────────────────────────────────────
 
@@ -312,6 +331,7 @@ class HeadScrub:
 class Bridge:
     def __init__(self) -> None:
         self.child = ACPChild()
+        self.cli = load_acp_cli()
         self.model = load_acp_model()
         # hl-xxx（hermes-live 自铸会话身份）→ ACP sessionId
         self.sessions: dict[str, str] = {}
@@ -376,7 +396,7 @@ class Bridge:
 
         try:
             async with self.turn_lock:
-                await self.child.ensure_alive(self.model)
+                await self.child.ensure_alive(self.cli, self.model)
                 acp_sid = await self._acp_session_for(hl_id)
                 await resp.write(sse(chunk({"role": "assistant", "content": ""})))
                 scrub = HeadScrub()
@@ -426,7 +446,7 @@ async def amain() -> None:
     bridge = Bridge()
 
     async def on_start(_app: web.Application) -> None:
-        await bridge.child.ensure_alive(bridge.model)
+        await bridge.child.ensure_alive(bridge.cli, bridge.model)
 
     async def on_cleanup(_app: web.Application) -> None:
         bridge.child.kill()
