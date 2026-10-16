@@ -33,6 +33,12 @@
   - 2026-10-06 高律师定「换回ai版ds」：AI 版 CLI（WorkBuddy AI.app）+ deepseek-v4.1-flash。
     ⚠ AI 版该 id 不在官方菜单（CLI 包成 custom model、usage 不计分母），实测出字正常且
     探针自报 DeepSeek-V4.1-Flash；官方清单里的 deepseek-v3-2-volc 实测空响应不可用。
+  - 2026-10-17 AI 版 ds 端点死亡，切中枢同款：主版 CLI + glm-5.3-flashx。发现路径＝
+    高律师令查日志 Q/A 头部剥除记录 → 顺带 E2E 探针，AI 版 deepseek-v4.1-flash 连续
+    空响应（首 chunk 空正文即 stop，与 10-06 记录的 deepseek-v3-2-volc 空响应同级）、
+    one-shot 挂起 5min 无字；而中枢（主版 + glm-5.3-flashx）同晚仍在正常出字
+    （cc-connect turn complete, response_len 848–3097）。已切并 kickstart 重启桥，
+    E2E 探针恢复流式出字、首句即正文无 Q/A 回声。备份 config.yaml.bak-20261017-ai-ds-dead。
 - 版本号 0.4.9（重启后 /api/health 生效）；main.py/PROJECT.md 的 gateway 表述改 ACP 桥。
 
 ### Notes
