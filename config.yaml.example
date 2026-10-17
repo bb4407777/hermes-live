@@ -20,8 +20,8 @@
 # voice_system_prompt: 自定义语音风格提示……
 # acp_cli: <CLI 绝对路径>   # 对话引擎二进制；主版=WorkBuddy.app（copilot.tencent.com）
 #                           # AI 版=WorkBuddy AI.app（workbuddy.ai），凭据独立   ▸线上 主版
-# acp_model: glm-5.3-flashx # 对话模型（ACP 桥读此值 spawn；改完重启桥生效）
+# acp_model: deepseek-v4.1-flash # 对话模型（ACP 桥读此值 spawn；改完重启桥生效）
 #                           # 主版菜单=具体 id（glm/deepseek/space-bunny…）；AI 版官方档只有
 #                           # fast/balanced/primary/deep 抽象档。⚠ 2026-10-17 实测 AI 版
-#                           # deepseek-v4.1-flash 端点死亡（E2E 连续空响应、one-shot 挂起），
-#                           # 现切中枢同款 主版+glm-5.3-flashx  ▸线上 glm-5.3-flashx
+#                           # deepseek-v4.1-flash 端点死亡（E2E 连续空响应、one-shot 挂起）；
+#                           # 改主版 CLI + 同 id 出字正常  ▸线上 主版+deepseek-v4.1-flash

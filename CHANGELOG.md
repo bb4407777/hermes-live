@@ -39,6 +39,9 @@
     one-shot 挂起 5min 无字；而中枢（主版 + glm-5.3-flashx）同晚仍在正常出字
     （cc-connect turn complete, response_len 848–3097）。已切并 kickstart 重启桥，
     E2E 探针恢复流式出字、首句即正文无 Q/A 回声。备份 config.yaml.bak-20261017-ai-ds-dead。
+  - 2026-10-17 高律师令「引擎改为主板ds」：主版 CLI + deepseek-v4.1-flash（同 id 在 AI 版
+    端点已死，主版为另一家凭据/端点，E2E 两发探针出字正常、完整收口）。备份
+    config.yaml.bak-20261017-pre-mainds（上一档 glm-5.3-flashx）。
 - 版本号 0.4.9（重启后 /api/health 生效）；main.py/PROJECT.md 的 gateway 表述改 ACP 桥。
 
 ### Notes
