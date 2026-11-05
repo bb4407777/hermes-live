@@ -9,3 +9,4 @@ tmp/
 macos/.build/
 node_modules/
 secrets/
+config.yaml.bak-*
