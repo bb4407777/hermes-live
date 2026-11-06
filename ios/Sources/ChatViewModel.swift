@@ -21,6 +21,8 @@ final class ChatViewModel: ObservableObject {
     @Published var orbLevel: Float = 0
     @Published var voice = "zh-CN-XiaoxiaoNeural"
     @Published var rate = "+30%"
+    /// 作答形态：text=只说文字（默认，2026-11-06 定）｜voice=合成语音播报
+    @Published var replyMode = "text"
 
     let serverAddr: String
     let serverToken: String
@@ -32,6 +34,7 @@ final class ChatViewModel: ObservableObject {
     private var agentTurn = -1
     private var reconnectTask: Task<Void, Never>?
     private var reconnectDelay: UInt64 = 1
+    private var stoppedByBackground = false
 
     init(serverAddr: String, serverToken: String) {
         self.serverAddr = serverAddr
@@ -90,10 +93,19 @@ final class ChatViewModel: ObservableObject {
 
     func interrupt() { ws.send(json: ["type": "interrupt"]) }
 
-    /// 音色/语速改了即时同步（对齐 web pushConfig）
+    /// 音色/语速/作答形态改了即时同步（对齐 web pushConfig）
     func pushConfig() {
         guard ws.isOpen else { return }
-        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate])
+        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate,
+                       "reply": replyMode])
+    }
+
+    /// 切换作答形态：切到文字时丢掉在途音频，上一轮的语音不再继续播
+    func setReplyMode(_ mode: String) {
+        guard mode != replyMode else { return }
+        replyMode = mode
+        if mode == "text" { audio.flushPlayback() }
+        pushConfig()
     }
 
     func newSession() {
@@ -149,8 +161,20 @@ final class ChatViewModel: ObservableObject {
 
     private var pendingText: String?
 
-    /// 回前台时补一次连接：系统在后台可能静默掐断 socket，不一定会回调 close。
+    /// 切出 App 就停录音：不留后台长连接，也不再占麦克风。
+    func pauseForBackground() {
+        guard isLive else { return }
+        stoppedByBackground = true
+        stopAll(status: "已切出，录音已停止")
+    }
+
+    /// 回前台：切出时停过的自动续上；只是掉线的补一次连接。
     func resumeAfterForeground() {
+        if stoppedByBackground {
+            stoppedByBackground = false
+            if !isLive { toggle() }
+            return
+        }
         guard isLive, !ws.isOpen else { return }
         statusText = "重连中…"
         connectAndStart()
@@ -164,7 +188,8 @@ final class ChatViewModel: ObservableObject {
     private func didConnect() {
         reconnectDelay = 1
         statusText = "已连接"
-        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate])
+        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate,
+                       "reply": replyMode])
         if let t = pendingText {
             pendingText = nil
             ws.send(json: ["type": "text", "text": t])
@@ -259,7 +284,12 @@ final class ChatViewModel: ObservableObject {
         case "tts_sentence":
             break   // 预留：逐句高亮
         case "tts_end":
-            if let turn = msg["turn"] as? Int {
+            if replyMode == "text" {
+                // 文字模式下服务端不出音频；若对面还是语音版，立刻回执让它别再等（音频已丢弃）
+                if let turn = msg["turn"] as? Int {
+                    ws.send(json: ["type": "playback_done", "turn": turn])
+                }
+            } else if let turn = msg["turn"] as? Int {
                 audio.markTtsEnd(turn: turn)
             }
         case "replaced":
@@ -276,6 +306,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func handleBinary(_ data: Data) {
+        guard replyMode == "voice" else { return }   // 文字作答：下行音频一律不播
         guard data.count > 2, data[0] == 0x01 else { return }
         let turn = Int(data[1])
         audio.enqueue(turn: turn, pcm: data.subdata(in: 2..<data.count))

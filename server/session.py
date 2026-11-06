@@ -63,6 +63,8 @@ class Session:
         self._ptt_buf: list[bytes] = []  # PTT 期间攒的帧（batch ASR 兜底用）
         self.closed = False
         self._recent_tts_texts: list[tuple[float, str]] = []  # (timestamp, sentence) 回声过滤缓冲
+        # 作答形态：voice=照常合成播放（网页默认）| text=只回文字（手机端默认，2026-11-06 定）
+        self.reply_mode = "voice"
 
     # ---------- 出站 ----------
 
@@ -208,8 +210,12 @@ class Session:
                 self.cfg.tts_voice = str(v)
             if r := obj.get("tts_rate"):
                 self.cfg.tts_rate = str(r)
+            if m := obj.get("reply"):
+                # voice=语音作答；text=只回文字（不出音频、不等 playback_done）
+                self.reply_mode = "text" if str(m) == "text" else "voice"
             self.send_json("hello", session_id=self.hermes.session_id,
-                           voice=self.cfg.tts_voice, asr_model=self.asr_label())
+                           voice=self.cfg.tts_voice, asr_model=self.asr_label(),
+                           reply=self.reply_mode)
         elif t == "restart":
             import os
             import sys
@@ -303,8 +309,12 @@ class Session:
 
     async def _run_turn(self, t: int, pcm_utt: bytes | None, text: str | None) -> None:
         m = TurnMetrics(turn=t)
+        text_mode = self.reply_mode == "text"
         queue: asyncio.Queue = asyncio.Queue()
-        tts_task = asyncio.create_task(self._tts_consumer(t, queue, m))
+        # 文字作答分支：整条 TTS 链路（分句、预合成、音频下发、等 playback_done）都不跑，
+        # 只推 agent_delta，agent_done 后直接回 listening。
+        tts_task = (None if text_mode
+                    else asyncio.create_task(self._tts_consumer(t, queue, m)))
         try:
             if text is None:
                 if self.doubao_asr is not None:
@@ -325,13 +335,15 @@ class Session:
                 m.mark("asr_done")
                 m.asr_text = text
                 if not text:
-                    tts_task.cancel()
+                    if tts_task:
+                        tts_task.cancel()
                     if self.turn == t:
                         self._enter_listening()
                     return
                 # 文本回声过滤：ASR 结果与近期 TTS 高度相似 → 自己的声音录进去了，丢弃
                 if self._is_tts_echo(text):
-                    tts_task.cancel()
+                    if tts_task:
+                        tts_task.cancel()
                     if self.turn == t:
                         self._enter_listening()
                     return
@@ -348,9 +360,10 @@ class Session:
                 if ev.kind == "delta":
                     m.mark("first_delta")
                     self.send_json("agent_delta", turn=t, text=ev.text)
-                    for s in assembler.feed(ev.text):
-                        m.mark("first_sentence")
-                        queue.put_nowait(s)
+                    if not text_mode:
+                        for s in assembler.feed(ev.text):
+                            m.mark("first_sentence")
+                            queue.put_nowait(s)
                 elif ev.kind == "tool":
                     if self.cfg.show_tool_progress:
                         tool = ev.tool or {}
@@ -359,16 +372,25 @@ class Session:
                                        emoji=tool.get("emoji"), status=tool.get("status"))
                     # 工具间隙缓冲语音：模型跑工具时不出 delta，若本 turn 还没开过口，
                     # 插一句缓冲句，避免语音断档显得卡（高律师 2026-08-13 定）
-                    if self.cfg.tool_buffer_text and m.first_audio is None:
+                    if (not text_mode and self.cfg.tool_buffer_text
+                            and m.first_audio is None):
                         m.mark("first_sentence")
                         queue.put_nowait(self.cfg.tool_buffer_text)
                 elif ev.kind == "done":
                     finish_reason = ev.finish_reason
-            for s in assembler.flush():
-                m.mark("first_sentence")
-                queue.put_nowait(s)
-            queue.put_nowait(None)  # 收口哨兵
+            if not text_mode:
+                for s in assembler.flush():
+                    m.mark("first_sentence")
+                    queue.put_nowait(s)
+                queue.put_nowait(None)  # 收口哨兵
             self.send_json("agent_done", turn=t, finish_reason=finish_reason)
+            if text_mode:
+                m.mark("done")
+                m.log()
+                if self.turn == t:
+                    # 没有外放，不存在把自己念的话录进来，不必留回声忽略窗
+                    self._enter_listening()
+                return
             await tts_task  # 等音频发完 + 客户端播完
             m.mark("done")
             m.log()
@@ -382,7 +404,7 @@ class Session:
             if self.turn == t:
                 self._enter_listening()
         finally:
-            if not tts_task.done():
+            if tts_task is not None and not tts_task.done():
                 tts_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await tts_task

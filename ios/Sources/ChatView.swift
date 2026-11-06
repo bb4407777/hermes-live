@@ -106,24 +106,32 @@ struct ChatView: View {
             }
             HStack(spacing: 8) {
                 Menu {
-                    ForEach(Self.voices, id: \.0) { v in
-                        Button(v.1) {
-                            vm.voice = v.0
-                            vm.pushConfig()
-                        }
-                    }
+                    Button("文字作答（不出声）") { vm.setReplyMode("text") }
+                    Button("语音作答（朗读回答）") { vm.setReplyMode("voice") }
                 } label: {
-                    MenuChip(text: Self.voices.first { $0.0 == vm.voice }?.1 ?? "音色")
+                    MenuChip(text: vm.replyMode == "text" ? "文字作答" : "语音作答")
                 }
-                Menu {
-                    ForEach(Self.rates, id: \.0) { r in
-                        Button(r.1) {
-                            vm.rate = r.0
-                            vm.pushConfig()
+                if vm.replyMode == "voice" {
+                    Menu {
+                        ForEach(Self.voices, id: \.0) { v in
+                            Button(v.1) {
+                                vm.voice = v.0
+                                vm.pushConfig()
+                            }
                         }
+                    } label: {
+                        MenuChip(text: Self.voices.first { $0.0 == vm.voice }?.1 ?? "音色")
                     }
-                } label: {
-                    MenuChip(text: Self.rates.first { $0.0 == vm.rate }?.1 ?? "语速")
+                    Menu {
+                        ForEach(Self.rates, id: \.0) { r in
+                            Button(r.1) {
+                                vm.rate = r.0
+                                vm.pushConfig()
+                            }
+                        }
+                    } label: {
+                        MenuChip(text: Self.rates.first { $0.0 == vm.rate }?.1 ?? "语速")
+                    }
                 }
                 Spacer(minLength: 4)
                 Button("打断") { vm.interrupt() }

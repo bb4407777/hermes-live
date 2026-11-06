@@ -171,6 +171,17 @@ final class AudioController: NSObject {
         }
     }
 
+    /// 切到文字作答：丢弃在途音频，上一轮的回答不再继续播
+    func flushPlayback() {
+        playQueue.async {
+            self.gen &+= 1
+            self.pending = 0
+            self.ttsEndReceived = false
+            self.player.stop()
+            if self.running { self.player.play() }
+        }
+    }
+
     func enqueue(turn: Int, pcm: Data) {
         playQueue.async {
             guard self.running, turn == self.currentTurn else { return }
