@@ -19,7 +19,7 @@ struct HermesLiveApp: App {
 }
 
 struct RootView: View {
-    @AppStorage("serverAddr") private var serverAddr = ""
+    @AppStorage("serverAddr") private var serverAddr = "live.gaochengbin.com"
     @AppStorage("serverToken") private var serverToken = ""
     @State private var showSettings = false
 

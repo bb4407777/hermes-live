@@ -46,6 +46,7 @@ final class HermesWSClient: NSObject {
             onClose(nil)
             return
         }
+        NSLog("HERMESWS addr=%@ url=%@", addr, url.absoluteString)
         let s = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         session = s
         let t = s.webSocketTask(with: url)
