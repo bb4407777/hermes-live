@@ -8,6 +8,16 @@
   「说话」模式开麦克风走原有 VAD。手机默认打字（高律师 2026-11-06 定）。
   切换时重接播放节点（类别变会换主混音器格式，不重接即 -10868）。
 
+### Fixed
+- **打字模式发指令即闪退（SIGABRT）**：崩溃在 `hermes-live.playback` 线程的
+  `AVAudioPlayerNode.play()`——引擎被路由变化/后台挂起停掉后仍调 play，AVFAudio 抛 ObjC
+  异常（`AVAE_RaiseException`），Swift 接不住直接 abort。改为：引擎启停/类别切换/接线
+  全部串到同一条串行队列；每次 play 前确认 `engine.isRunning`，不在跑就先 `start()`；
+  新增 `AVAudioEngineConfigurationChange` 监听重建引擎。`start()`/`setMicEnabled()`
+  改为返回是否成功，失败不再假装麦已开。
+- **点「说话」没反应**：引擎此前已停在停止态时，`setMicEnabled` 直接 return success，
+  界面切了但没收音。改为引擎没起来时按新形态整个重开，失败回退打字并在对话里报错。
+
 ## [0.4.9] - 2026-10-05
 
 > 对话后端从已退役的 Hermes gateway 转为**中枢同款引擎**。10-02 网关退役后 8647 无人监听，

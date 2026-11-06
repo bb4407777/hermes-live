@@ -74,6 +74,7 @@ final class ChatViewModel: ObservableObject {
             statusText = "连接中…"
             UIApplication.shared.isIdleTimerDisabled = true   // 对话中不锁屏
             if audio.running {
+                _ = audio.setMicEnabled(inputMode == "voice")   // 形态可能在停止期间改过
                 connectAndStart()
             } else {
                 startAudio()
@@ -84,7 +85,7 @@ final class ChatViewModel: ObservableObject {
     /// 按输入形态开音频：打字模式只开播放（不收音），语音模式才申请麦克风
     private func startAudio() {
         guard inputMode == "voice" else {
-            audio.start(mic: false)
+            if !audio.start(mic: false) { addLine(.error, "音频输出启动失败，回答可能没声音") }
             connectAndStart()
             return
         }
@@ -92,7 +93,7 @@ final class ChatViewModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if granted {
-                    self.audio.start(mic: true)
+                    if !self.audio.start(mic: true) { self.addLine(.error, "麦克风启动失败") }
                     self.connectAndStart()
                 } else {
                     self.addLine(.error, "无麦克风权限，请到系统设置开启")
@@ -114,22 +115,28 @@ final class ChatViewModel: ObservableObject {
     func setInputMode(_ mode: String) {
         guard mode != inputMode else { return }
         inputMode = mode
+        statusText = mode == "voice" ? "语音输入，开口说话" : "打字输入，回车发送"
         if !isLive { return }          // 未开始：下次开始时按新形态起音频
         if mode == "voice" {
             AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
                     if granted {
-                        self.audio.setMicEnabled(true)
+                        if !self.audio.setMicEnabled(true) {
+                            self.addLine(.error, "麦克风启动失败，稍后再试")
+                            self.inputMode = "text"
+                            self.statusText = "打字输入，回车发送"
+                        }
                     } else {
                         self.addLine(.error, "无麦克风权限，请到系统设置开启")
                         self.inputMode = "text"
-                        self.audio.setMicEnabled(false)
+                        self.statusText = "打字输入，回车发送"
+                        _ = self.audio.setMicEnabled(false)
                     }
                 }
             }
         } else {
-            audio.setMicEnabled(false)
+            _ = audio.setMicEnabled(false)
         }
     }
 

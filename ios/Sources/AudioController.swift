@@ -49,49 +49,75 @@ final class AudioController: NSObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(onInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(onConfigChange(_:)),
+            name: .AVAudioEngineConfigurationChange, object: engine)
     }
 
     // MARK: - 生命周期
 
-    /// 开音频。mic=false 只开播放（打字输入，完全不收音）。
-    func start(mic: Bool) {
-        guard !running else { return }
+    // 生命周期：引擎启停、类别切换、播放节点接线全部串到 playQueue 上。
+    // 引擎不在跑时调 player.play() 会抛 ObjC 异常（AVAE_RaiseException），
+    // Swift 接不住，直接 SIGABRT——所以每次 play 前都确认 engine.isRunning。
+    /// 开音频。mic=false 只开播放（打字输入，完全不收音）。返回是否真的起来了。
+    @discardableResult
+    func start(mic: Bool) -> Bool {
+        playQueue.sync { startLocked(mic: mic) }
+    }
+
+    private func startLocked(mic: Bool) -> Bool {   // 仅在 playQueue 上调用
+        guard !running else { return true }
         activateSession(mic: mic)
         if mic { installTap() }
         do {
             try engine.start()
+            guard engine.isRunning else { return false }
             player.play()
             running = true
+            return true
         } catch {
+            running = false
+            removeTap()
             try? AVAudioSession.sharedInstance().setActive(false)
+            return false
         }
     }
 
     /// 运行中切换是否收音：换类别会改主混音器格式，必须停引擎→重接→再起。
-    func setMicEnabled(_ on: Bool) {
-        guard running, on != tapInstalled else { return }
-        engine.stop()
-        if !on { removeTap() }
-        activateSession(mic: on)
-        if on { installTap() }
-        do {
-            try engine.start()
-            player.play()
-        } catch { /* 起不来就停在停止态，下次 start/stop 重建 */ }
+    /// 引擎本来就没起来时按新形态整个重开（否则「点了没反应」）。
+    @discardableResult
+    func setMicEnabled(_ on: Bool) -> Bool {
+        playQueue.sync {
+            guard running else { return startLocked(mic: on) }
+            guard on != tapInstalled else { return true }
+            engine.stop()
+            player.stop()
+            if !on { removeTap() }
+            activateSession(mic: on)
+            if on { installTap() }
+            do {
+                try engine.start()
+                guard engine.isRunning else { return false }
+                player.play()
+                return true
+            } catch {
+                return false
+            }
+        }
     }
 
     func stop() {
-        guard running else { return }
-        running = false
-        removeTap()
-        engine.stop()
         playQueue.sync {
+            guard running else { return }
+            running = false
+            removeTap()
+            player.stop()
+            engine.stop()
             gen &+= 1
             pending = 0
             ttsEndReceived = false
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        player.stop()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     /// 会话类别 + 播放节点接线。类别一变主混音器输出格式就变，必须按新格式重接，
@@ -109,11 +135,13 @@ final class AudioController: NSObject {
         try? session.setActive(true)
         engine.disconnectNodeOutput(player)
         let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
-        guard fmt.sampleRate > 0 else { return }
-        mixFormat = fmt
-        engine.connect(player, to: engine.mainMixerNode, format: fmt)
+        // 类别刚切时主混音器格式可能还没就绪（rate=0），此时不要 connect，用输出节点兜底。
+        let outFmt = fmt.sampleRate > 0 ? fmt : engine.outputNode.outputFormat(forBus: 0)
+        guard outFmt.sampleRate > 0, outFmt.channelCount > 0 else { return }
+        mixFormat = outFmt
+        engine.connect(player, to: engine.mainMixerNode, format: outFmt)
         // 24k Int16 → 混音器格式（通常 48k Float32）
-        playbackConverter = AVAudioConverter(from: playbackFormat, to: fmt)
+        playbackConverter = AVAudioConverter(from: playbackFormat, to: outFmt)
     }
 
     private func installTap() {
@@ -195,8 +223,19 @@ final class AudioController: NSObject {
             self.pending = 0
             self.ttsEndReceived = false
             self.player.stop()
-            if self.running { self.player.play() }
+            self.playIfEngineRunning()
         }
+    }
+
+    /// 引擎停了（来电、路由变化、被系统挂起）就重启再播；起不来就别调 play，
+    /// 否则 AVAudioPlayerNode 会抛 ObjC 异常，Swift 无法捕获，直接崩。
+    private func playIfEngineRunning() {   // 仅在 playQueue 上调用
+        guard running else { return }
+        if !engine.isRunning {
+            try? engine.start()
+        }
+        guard engine.isRunning else { return }
+        player.play()
     }
 
     func enqueue(turn: Int, pcm: Data) {
@@ -274,15 +313,27 @@ final class AudioController: NSObject {
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        guard type == .ended, running else { return }   // began：引擎已被系统挂起，无需处理
+        guard type == .ended else { return }   // began：引擎已被系统挂起，无需处理
         let opts = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
         guard AVAudioSession.InterruptionOptions(rawValue: opts).contains(.shouldResume)
         else { return }
         // 打断结束后引擎需重新启动（系统不会自动恢复 input tap）
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-            try engine.start()
-            player.play()
-        } catch { /* 恢复失败：下次 start/stop 重建 */ }
+        playQueue.async { [weak self] in
+            guard let self, self.running else { return }
+            try? AVAudioSession.sharedInstance().setActive(true)
+            try? self.engine.start()
+            self.playIfEngineRunning()
+        }
+    }
+
+    /// 路由/格式变化（插拔耳机、切扬声器）会让引擎自己停下，这里重建并续播。
+    @objc private func onConfigChange(_ note: Notification) {
+        playQueue.async { [weak self] in
+            guard let self, self.running else { return }
+            guard !self.engine.isRunning else { return }
+            self.activateSession(mic: self.tapInstalled)
+            try? self.engine.start()
+            self.playIfEngineRunning()
+        }
     }
 }
