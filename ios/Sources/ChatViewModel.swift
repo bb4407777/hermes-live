@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftUI
+import AVFoundation
 
 struct ChatMsg: Identifiable {
     enum Kind { case user, agent, tool, error }
@@ -264,7 +265,7 @@ final class ChatViewModel: ObservableObject {
     private func handleBinary(_ data: Data) {
         guard data.count > 2, data[0] == 0x01 else { return }
         let turn = Int(data[1])
-        audio.enqueue(turn: turn, pcm: data.subdata(in: 2...))
+        audio.enqueue(turn: turn, pcm: data.subdata(in: 2..<data.count))
     }
 
     private func setState(_ newState: String, turn: Int? = nil) {

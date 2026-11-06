@@ -6,7 +6,7 @@
 
 import AVFoundation
 
-final class AudioController {
+final class AudioController: NSObject {
     var onFrame: (Data) -> Void = { _ in }          // 512 样本 Int16LE（1024 字节/帧）
     var onLevel: (Float) -> Void = { _ in }         // RMS 电平，驱动状态球动画
     var onPlaybackDone: (Int) -> Void = { _ in }    // turn 播完 → 发 playback_done
@@ -37,7 +37,7 @@ final class AudioController {
 
     private(set) var running = false
 
-    init() {
+    override init() {
         super.init()
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
