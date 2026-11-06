@@ -43,7 +43,7 @@ import uuid
 from pathlib import Path
 
 import yaml
-from aiohttp import web
+from aiohttp import ClientConnectionResetError, web
 
 log = logging.getLogger("acp_bridge")
 
@@ -493,13 +493,19 @@ class Bridge:
         except asyncio.CancelledError:
             # 客户端断开（语音打断/页面刷新）：prompt_stream 的 finally 会发 session/cancel
             raise
+        except ClientConnectionResetError:
+            log.info("client disconnected")
+            return resp
         except Exception as e:  # noqa: BLE001 — 线上任何断法都以 error 事件收口
             log.exception("chat turn failed")
             try:
                 await resp.write(sse({"message": f"bridge: {e}"}, event="error"))
             except Exception:  # noqa: BLE001
                 pass
-        await resp.write_eof()
+        try:
+            await resp.write_eof()
+        except ClientConnectionResetError:
+            log.info("client disconnected")
         return resp
 
 

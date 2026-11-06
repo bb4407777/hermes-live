@@ -256,6 +256,32 @@ def test_tts_failure_still_closes_the_turn():
          tts=FlakyTTS(fail_from=2))
 
 
+def test_tts_recovers_after_two_transient_failures(monkeypatch):
+    class RecoveringTTS:
+        def __init__(self):
+            self.attempts = 0
+
+        async def synth_stream(self, sentence):
+            self.attempts += 1
+            if self.attempts <= 2:
+                raise RuntimeError("临时故障")
+            yield CHUNK
+
+    monkeypatch.setattr("server.session.TTS_RETRY_DELAYS", (0.001, 0.002))
+    tts = RecoveringTTS()
+
+    async def scenario(s, outbox, hermes):
+        events: list = []
+        await s.on_control({"type": "start"})
+        await s.on_control({"type": "text", "text": "在吗"})
+        await _until(outbox, events, _is("tts_end"), 5, "tts_end")
+        assert tts.attempts == 3
+        assert any(e[0] == "bin" for e in events)
+        assert "error" not in _types(events)
+
+    _run(scenario, reply=["收到。"], tts=tts)
+
+
 def test_uplink_dropped_once_outbound_is_dead():
     """半开隧道（手机息屏）：出站写失败后 read 侧还能继续送麦克风帧，heartbeat 判死要 ~30s。
     这期间再起话轮，就是给一个永远收不到回音的连接白烧网关 token。"""

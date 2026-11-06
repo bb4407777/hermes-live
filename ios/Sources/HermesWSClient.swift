@@ -84,8 +84,8 @@ final class HermesWSClient: NSObject {
         session = nil
     }
 
-    private func fail() {
-        guard isOpen || task != nil else { return }
+    private func fail(_ failedTask: URLSessionWebSocketTask) {
+        guard task === failedTask, isOpen || task != nil else { return }
         isOpen = false
         task = nil
         session?.invalidateAndCancel()
@@ -94,8 +94,9 @@ final class HermesWSClient: NSObject {
     }
 
     private func receive() {
-        task?.receive { [weak self] result in
-            guard let self, self.task != nil else { return }
+        let receivingTask = task
+        receivingTask?.receive { [weak self] result in
+            guard let self, let receivingTask, self.task === receivingTask else { return }
             switch result {
             case .success(let msg):
                 switch msg {
@@ -105,7 +106,7 @@ final class HermesWSClient: NSObject {
                 }
                 self.receive()
             case .failure:
-                self.fail()
+                self.fail(receivingTask)
             }
         }
     }
@@ -125,6 +126,7 @@ extension HermesWSClient: URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
                     reason: Data?) {
+        guard webSocketTask === task else { return }
         NSLog("HERMESWS close code=%d", closeCode.rawValue)
         let wasOpen = isOpen
         isOpen = false

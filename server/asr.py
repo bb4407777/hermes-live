@@ -109,6 +109,7 @@ class DoubaoStreamingASR:
 
     # 话中重连上限：远端掐流后剩余语音进新会话继续转写，超限则静默丢帧
     _MAX_RECONNECT = 3
+    _RECONNECT_DELAYS = (1.0, 2.0, 4.0)
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -158,7 +159,7 @@ class DoubaoStreamingASR:
         self._last_error = ""
         self._start_session()
 
-    def _start_session(self) -> None:
+    def _start_session(self, delay: float = 0.0) -> None:
         """建一个新的后台 WebSocket 会话（新话轮或话中重连共用）。
         队列/future 以局部变量捕获进 task 闭包，旧 task 迟到结果不窜轮。"""
         loop = asyncio.get_event_loop()
@@ -168,13 +169,16 @@ class DoubaoStreamingASR:
         self._pcm_queue = queue
         self._result_future = future
         self._partial = ""
-        logger.info("doubao: launching background session task (reconnect #%d)",
-                    self._reconnects)
-        self._task = loop.create_task(self._run_session(queue, future))
+        logger.info("doubao: launching background session task (reconnect #%d, delay=%.1fs)",
+                    self._reconnects, delay)
+        self._task = loop.create_task(self._run_session(queue, future, delay))
 
-    async def _run_session(self, queue: asyncio.Queue, future: asyncio.Future) -> None:
+    async def _run_session(self, queue: asyncio.Queue, future: asyncio.Future,
+                           delay: float = 0.0) -> None:
         from doubaoime_asr import transcribe_realtime
 
+        if delay:
+            await asyncio.sleep(delay)
         logger.info("doubao session starting...")
 
         async def pcm_gen():
@@ -211,9 +215,8 @@ class DoubaoStreamingASR:
         if not self._available or self._pcm_queue is None:
             return ""
         if self._task is not None and self._task.done():
-            # 远端掐流/异常后台已死：旧实现每帧打 WARNING 刷屏（单日数千条）
-            # 且此后语音全丢 → 用户侧「说完没反应」。现在话中自动重连，
-            # 已识别文本接力进 _carried，本帧直接喂进新会话。
+            # 远端掐流/异常后台已死：退避期间任务仍未结束，后续帧继续进新队列，
+            # 不会每帧重复建连；已识别文本接力进 _carried。
             if self._reconnects < self._MAX_RECONNECT and self._loop is not None:
                 if self._result_future is not None and self._result_future.done():
                     try:
@@ -224,10 +227,11 @@ class DoubaoStreamingASR:
                     if seg:
                         self._carried = f"{self._carried} {seg}".strip()
                 self._reconnects += 1
-                logger.warning("doubao feed: 后台会话已死（%s），第 %d/%d 次话中重连",
+                delay = self._RECONNECT_DELAYS[self._reconnects - 1]
+                logger.warning("doubao feed: 后台会话已死（%s），第 %d/%d 次话中重连，%.1f 秒后执行",
                                self._last_error or "远端掐流",
-                               self._reconnects, self._MAX_RECONNECT)
-                self._start_session()
+                               self._reconnects, self._MAX_RECONNECT, delay)
+                self._start_session(delay=delay)
             else:
                 self._dropped += 1
                 if self._dropped % 200 == 1:

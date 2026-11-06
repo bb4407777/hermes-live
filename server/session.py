@@ -33,6 +33,7 @@ FRAME_BYTES = 1024  # 512 样本 * 2 字节
 ECHO_GUARD_S = 0.3  # speaking→listening 后的余声忽略窗
 TTS_ECHO_WINDOW_S = 30.0  # 最近 N 秒内说过的句子参与文本回声比对
 TTS_ECHO_RATIO = 0.55     # SequenceMatcher ratio 超过此值判定为回声
+TTS_RETRY_DELAYS = (1.0, 2.0)
 
 
 class Session:
@@ -401,7 +402,8 @@ class Session:
         async def synth_to_queue(sentence: str, chunks: asyncio.Queue) -> None:
             try:
                 yielded = False
-                for attempt in (1, 2):
+                max_attempts = len(TTS_RETRY_DELAYS) + 1
+                for attempt in range(1, max_attempts + 1):
                     try:
                         # aclosing：取消/异常时显式关掉 edge-tts 流，防挂起任务告警
                         async with contextlib.aclosing(self.tts.synth_stream(sentence)) as gen:
@@ -412,10 +414,13 @@ class Session:
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
-                        # 半句失败不重试（音频会跳段）；整句未出声则单次重试
-                        if yielded or attempt == 2:
+                        # 半句失败不重试（音频会跳段）；整句未出声才退避重试
+                        if yielded or attempt == max_attempts:
                             raise
-                        logger.warning("edge-tts 失败重试一次: %s", exc)
+                        delay = TTS_RETRY_DELAYS[attempt - 1]
+                        logger.warning("edge-tts 失败，%.1f 秒后重试（%d/%d）: %s",
+                                       delay, attempt, max_attempts, exc)
+                        await asyncio.sleep(delay)
             finally:
                 chunks.put_nowait(None)
 
