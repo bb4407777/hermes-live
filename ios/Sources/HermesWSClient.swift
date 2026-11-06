@@ -59,16 +59,6 @@ final class HermesWSClient: NSObject {
         t.maximumMessageSize = 4 * 1024 * 1024   // 对齐服务端 max_msg_size
         task = t
         t.resume()
-        // webSocketTask 没有 onopen 回调：resume 后 ping 通即视为已连接
-        t.sendPing { [weak self] error in
-            guard let self else { return }
-            if error != nil {
-                self.fail()
-            } else if !self.isOpen {
-                self.isOpen = true
-                self.onOpen()
-            }
-        }
         receive()
     }
 
@@ -122,9 +112,20 @@ final class HermesWSClient: NSObject {
 }
 
 extension HermesWSClient: URLSessionWebSocketDelegate {
+    // 握手完成才算连通：resume 后立刻 sendPing 在 iOS 16 上会报
+    // "Socket is not connected" 把刚建好的连接判死，导致连上即断的死循环。
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol protocol: String?) {
+        guard webSocketTask === task else { return }
+        NSLog("HERMESWS open")
+        isOpen = true
+        onOpen()
+    }
+
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
                     reason: Data?) {
+        NSLog("HERMESWS close code=%d", closeCode.rawValue)
         let wasOpen = isOpen
         isOpen = false
         task = nil
