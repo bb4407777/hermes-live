@@ -7,6 +7,7 @@ struct ChatView: View {
     var onSettings: () -> Void
     @State private var textIn = ""
     @State private var showRestartConfirm = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private static let stateLabel: [String: String] = [
         "idle": "已暂停",
@@ -36,6 +37,11 @@ struct ChatView: View {
         .background(Color(red: 0.05, green: 0.07, blue: 0.09).ignoresSafeArea())
         .onAppear {
             if !vm.isLive { vm.toggle() }   // 打开即聊（对齐网页版 autostart）
+        }
+        .onChange(of: scenePhase) { phase in
+            // iOS 退到后台会直接掐掉 socket，回前台不一定收到 close 回调，
+            // 这里主动补一次重连，避免界面停在「连接断开」。
+            if phase == .active { vm.resumeAfterForeground() }
         }
     }
 

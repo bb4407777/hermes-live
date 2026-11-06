@@ -149,6 +149,13 @@ final class ChatViewModel: ObservableObject {
 
     private var pendingText: String?
 
+    /// 回前台时补一次连接：系统在后台可能静默掐断 socket，不一定会回调 close。
+    func resumeAfterForeground() {
+        guard isLive, !ws.isOpen else { return }
+        statusText = "重连中…"
+        connectAndStart()
+    }
+
     private func connectAndStart() {
         cancelReconnect()
         ws.connect(addr: serverAddr, token: serverToken)
