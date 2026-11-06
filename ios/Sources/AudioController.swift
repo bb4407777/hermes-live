@@ -17,6 +17,8 @@ final class AudioController: NSObject {
     private let player = AVAudioPlayerNode()
     private var converter: AVAudioConverter?
     private var inputSampleRate: Double = 48000
+    private var mixFormat: AVAudioFormat?
+    private var playbackConverter: AVAudioConverter?
 
     private let captureFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
@@ -39,8 +41,21 @@ final class AudioController: NSObject {
 
     override init() {
         super.init()
+        // 先激活音频会话再连引擎：voiceChat 模式下主混音器只接受它自己的输出格式，
+        // 直接按 24k 连接会抛 com.apple.coreaudio.avfaudio（-10868 格式不支持）。
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .voiceChat,
+                                 options: [.defaultToSpeaker, .allowBluetooth])
+        try? session.setActive(true)
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+        let mixer = engine.mainMixerNode
+        let fmt = mixer.outputFormat(forBus: 0)
+        if fmt.sampleRate > 0 {
+            mixFormat = fmt
+            engine.connect(player, to: mixer, format: fmt)
+            // 24k Int16 → 混音器格式（通常 48k Float32）
+            playbackConverter = AVAudioConverter(from: playbackFormat, to: fmt)
+        }
         NotificationCenter.default.addObserver(
             self, selector: #selector(onInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
@@ -156,13 +171,36 @@ final class AudioController: NSObject {
             guard self.running, turn == self.currentTurn else { return }
             let frames = pcm.count / 2
             guard frames > 0,
-                  let buf = AVAudioPCMBuffer(pcmFormat: self.playbackFormat,
+                  let src = AVAudioPCMBuffer(pcmFormat: self.playbackFormat,
                                              frameCapacity: AVAudioFrameCount(frames))
             else { return }
-            buf.frameLength = AVAudioFrameCount(frames)
-            if let dst = buf.int16ChannelData?[0] {
+            src.frameLength = AVAudioFrameCount(frames)
+            if let dst = src.int16ChannelData?[0] {
                 pcm.copyBytes(to: UnsafeMutableBufferPointer(start: dst, count: frames))
             }
+
+            // 播放节点按混音器格式连接，24k 帧要先转过去再排
+            var buf = src
+            if let conv = self.playbackConverter, let fmt = self.mixFormat {
+                let capacity = AVAudioFrameCount(
+                    Double(frames) * fmt.sampleRate / 24000.0) + 64
+                guard let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: capacity)
+                else { return }
+                var supplied = false
+                var error: NSError?
+                let status = conv.convert(to: out, error: &error) { _, st in
+                    if supplied {
+                        st.pointee = .noDataNow
+                        return nil
+                    }
+                    supplied = true
+                    st.pointee = .haveData
+                    return src
+                }
+                guard error == nil, status != .error, out.frameLength > 0 else { return }
+                buf = out
+            }
+
             self.pending += 1
             let gen = self.gen
             self.player.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in

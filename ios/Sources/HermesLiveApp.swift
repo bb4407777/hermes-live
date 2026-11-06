@@ -6,6 +6,13 @@ import SwiftUI
 
 @main
 struct HermesLiveApp: App {
+    init() {
+        NSSetUncaughtExceptionHandler { ex in
+            NSLog("HERMESEXC name=%@ reason=%@", ex.name.rawValue, ex.reason ?? "-")
+            NSLog("HERMESEXC stack=%@", ex.callStackSymbols.joined(separator: " <- "))
+        }
+    }
+
     var body: some Scene {
         WindowGroup { RootView() }
     }
