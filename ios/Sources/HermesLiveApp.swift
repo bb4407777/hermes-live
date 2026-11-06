@@ -11,6 +11,16 @@ struct HermesLiveApp: App {
             NSLog("HERMESEXC name=%@ reason=%@", ex.name.rawValue, ex.reason ?? "-")
             NSLog("HERMESEXC stack=%@", ex.callStackSymbols.joined(separator: " <- "))
         }
+        // 内置地址与 token：开箱即用，不用手填（token 来自 secrets/Local.xcconfig，不入库）
+        let d = UserDefaults.standard
+        if (d.string(forKey: "serverAddr") ?? "").isEmpty {
+            d.set("live.gaochengbin.com", forKey: "serverAddr")
+        }
+        if (d.string(forKey: "serverToken") ?? "").isEmpty,
+           let t = Bundle.main.object(forInfoDictionaryKey: "HLAuthToken") as? String,
+           !t.isEmpty {
+            d.set(t, forKey: "serverToken")
+        }
     }
 
     var body: some Scene {

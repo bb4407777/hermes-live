@@ -116,10 +116,16 @@ final class ChatViewModel: ObservableObject {
     func restartServer() {
         addLine(.tool, "✓ 服务重启中，稍后自动重连…")
         var comp = URLComponents()
-        comp.scheme = "http"
-        let parts = serverAddr.split(separator: ":", maxSplits: 1).map(String.init)
-        comp.host = parts.first ?? serverAddr
-        if parts.count > 1 { comp.port = Int(parts[1]) }
+        if serverAddr.contains("://"), let u = URLComponents(string: serverAddr) {
+            comp.scheme = (u.scheme == "https" || u.scheme == "wss") ? "https" : "http"
+            comp.host = u.host
+            comp.port = u.port
+        } else {
+            comp.scheme = "http"
+            let parts = serverAddr.split(separator: ":", maxSplits: 1).map(String.init)
+            comp.host = parts.first ?? serverAddr
+            if parts.count > 1 { comp.port = Int(parts[1]) }
+        }
         comp.path = "/api/restart"
         if !serverToken.isEmpty {
             comp.queryItems = [URLQueryItem(name: "token", value: serverToken)]

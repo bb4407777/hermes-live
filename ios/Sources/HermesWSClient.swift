@@ -18,16 +18,21 @@ final class HermesWSClient: NSObject {
     func connect(addr: String, token: String) {
         close()
         var comp = URLComponents()
-        // 支持三种写法：live.gaochengbin.com（走 wss 公网隧道）、
+        var urlToken: String?
+        // 支持三种写法：整条链接（https://live.gaochengbin.com/?token=xxx，自动换 wss）、
+        // 域名 live.gaochengbin.com（wss 443 公网隧道）、
         // 192.168.1.5:8698 / 100.x.x.x:8698（局域网直连 ws）
         if addr.contains("://") {
             guard let u = URLComponents(string: addr) else {
                 onClose(nil)
                 return
             }
-            comp.scheme = u.scheme
+            comp.scheme = (u.scheme == "https" || u.scheme == "wss") ? "wss" : "ws"
             comp.host = u.host
             comp.port = u.port
+            let p = u.path
+            if !p.isEmpty, p != "/" { comp.path = p }
+            urlToken = u.queryItems?.first { $0.name == "token" }?.value
         } else {
             let parts = addr.split(separator: ":", maxSplits: 1).map(String.init)
             comp.host = parts.first ?? addr
@@ -38,9 +43,10 @@ final class HermesWSClient: NSObject {
                 comp.scheme = "wss"
             }
         }
-        comp.path = "/ws"
-        if !token.isEmpty {
-            comp.queryItems = [URLQueryItem(name: "token", value: token)]
+        if comp.path.isEmpty { comp.path = "/ws" }
+        let tk = token.isEmpty ? (urlToken ?? "") : token
+        if !tk.isEmpty {
+            comp.queryItems = [URLQueryItem(name: "token", value: tk)]
         }
         guard let url = comp.url else {
             onClose(nil)
