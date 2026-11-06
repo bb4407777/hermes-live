@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		161A150DE35E9DCDE96A1ABB /* HermesLiveApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B915B887EA2C5EA5F3ABCE1 /* HermesLiveApp.swift */; };
+		746B7694337750D37379AEE4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C5542887176F140ADF98AC08 /* Assets.xcassets */; };
 		74F8656989CD08AAE56069ED /* AudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614907B2E3D50437B530C28B /* AudioController.swift */; };
 		A2595729347DC9B9ABCA14BA /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A4D80511989E1553D3AE21 /* ChatView.swift */; };
 		C6C038714CBC44FE06FB2A07 /* HermesWSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D4E847D71BD98A7F2B9B56 /* HermesWSClient.swift */; };
@@ -20,6 +21,7 @@
 		4B915B887EA2C5EA5F3ABCE1 /* HermesLiveApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesLiveApp.swift; sourceTree = "<group>"; };
 		614907B2E3D50437B530C28B /* AudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioController.swift; sourceTree = "<group>"; };
 		68D4E847D71BD98A7F2B9B56 /* HermesWSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesWSClient.swift; sourceTree = "<group>"; };
+		C5542887176F140ADF98AC08 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FA861236CD2A36F341536972 /* HermesLive.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HermesLive.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -47,6 +49,7 @@
 		C914ABE05ACE31FC6337A0FD = {
 			isa = PBXGroup;
 			children = (
+				C5542887176F140ADF98AC08 /* Assets.xcassets */,
 				0B4909C9598DB34F599392CD /* Sources */,
 				26512AEFA40E3D77481D6E34 /* Products */,
 			);
@@ -60,6 +63,7 @@
 			buildConfigurationList = C9E6BB8760A54FAA82D15F07 /* Build configuration list for PBXNativeTarget "HermesLive" */;
 			buildPhases = (
 				2220496CBA7E3C341F64B8D0 /* Sources */,
+				6618B7E8FEBA7CB79FEDB1E5 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -104,6 +108,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6618B7E8FEBA7CB79FEDB1E5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				746B7694337750D37379AEE4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2220496CBA7E3C341F64B8D0 /* Sources */ = {

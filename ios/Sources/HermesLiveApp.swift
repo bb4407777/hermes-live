@@ -51,9 +51,9 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 18) {
             Text("Hermes-Live").font(.title2).bold().foregroundColor(.white)
-            Text("填 Mac 的地址。家里 Wi-Fi 用局域网 IP；\n配了 Tailscale 用 100.x 地址，外面也能连。")
+            Text("填 Mac 的地址：公网填 live.gaochengbin.com，\n同一 Wi-Fi 填 192.168.x.x:8698。")
                 .font(.footnote).foregroundColor(.gray).multilineTextAlignment(.center)
-            TextField("如 192.168.1.5:8698", text: $serverAddr)
+            TextField("live.gaochengbin.com", text: $serverAddr)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.URL)
                 .autocapitalization(.none)
