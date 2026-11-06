@@ -428,6 +428,22 @@ class Bridge:
 
         cid = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
+        # 心跳：工具长跑（读文件/批量检索）时上游可能几十秒无 delta，
+        # 客户端 sock_read=120 会判超时。每 15s 写一行 SSE 注释保活。
+        write_lock = asyncio.Lock()
+
+        async def write(data: bytes) -> None:
+            async with write_lock:
+                await resp.write(data)
+
+        async def keepalive() -> None:
+            while True:
+                await asyncio.sleep(15)
+                try:
+                    await write(b": ping\n\n")
+                except Exception:  # noqa: BLE001 — 连接已断，主循环会自己收口
+                    return
+
         def chunk(delta: dict, finish: str | None = None) -> dict:
             return {
                 "id": cid, "object": "chat.completion.chunk", "created": 0, "model": self.model,
@@ -440,32 +456,40 @@ class Bridge:
                     # CLI 重拉后旧 ACP 会话全部失效，不清映射该 hl-id 每轮都对死会话发 prompt
                     self.sessions.clear()
                 acp_sid = await self._acp_session_for(hl_id)
-                await resp.write(sse(chunk({"role": "assistant", "content": ""})))
-                scrub = HeadScrub()
-                async for upd in self.child.prompt_stream(acp_sid, user_text):
-                    kind = upd.get("sessionUpdate")
-                    if upd.get("_stopReason"):
-                        rest = scrub.flush()
-                        if rest:
-                            await resp.write(sse(chunk({"content": rest})))
-                        await resp.write(sse(chunk({}, finish="stop")))
-                        break
-                    if kind in DROP_UPDATES:
-                        continue
-                    if kind in TOOL_UPDATES:
-                        title = str(upd.get("title") or upd.get("toolCallId") or "tool")
-                        status_map = {"pending": "running", "in_progress": "running",
-                                      "completed": "done", "failed": "failed"}
-                        await resp.write(sse(
-                            {"tool": title, "label": title, "emoji": "🔧",
-                             "status": status_map.get(upd.get("status"), "running")},
-                            event="hermes.tool.progress"))
-                        continue
-                    if kind == "agent_message_chunk":
-                        text = scrub.feed((upd.get("content") or {}).get("text") or "")
-                        if text:
-                            await resp.write(sse(chunk({"content": text})))
-                await resp.write(b"data: [DONE]\n\n")
+                await write(sse(chunk({"role": "assistant", "content": ""})))
+                ka = asyncio.create_task(keepalive())
+                try:
+                    scrub = HeadScrub()
+                    async for upd in self.child.prompt_stream(acp_sid, user_text):
+                        kind = upd.get("sessionUpdate")
+                        if upd.get("_stopReason"):
+                            rest = scrub.flush()
+                            if rest:
+                                await write(sse(chunk({"content": rest})))
+                            await write(sse(chunk({}, finish="stop")))
+                            break
+                        if kind in DROP_UPDATES:
+                            continue
+                        if kind in TOOL_UPDATES:
+                            title = str(upd.get("title") or upd.get("toolCallId") or "tool")
+                            status_map = {"pending": "running", "in_progress": "running",
+                                          "completed": "done", "failed": "failed"}
+                            await write(sse(
+                                {"tool": title, "label": title, "emoji": "🔧",
+                                 "status": status_map.get(upd.get("status"), "running")},
+                                event="hermes.tool.progress"))
+                            continue
+                        if kind == "agent_message_chunk":
+                            text = scrub.feed((upd.get("content") or {}).get("text") or "")
+                            if text:
+                                await write(sse(chunk({"content": text})))
+                finally:
+                    ka.cancel()
+                    try:
+                        await ka
+                    except asyncio.CancelledError:
+                        pass
+                await write(b"data: [DONE]\n\n")
         except asyncio.CancelledError:
             # 客户端断开（语音打断/页面刷新）：prompt_stream 的 finally 会发 session/cancel
             raise
