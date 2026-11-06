@@ -40,27 +40,12 @@ final class AudioController: NSObject {
     private var ttsEndReceived = false
 
     private(set) var running = false
+    private var tapInstalled = false
 
     override init() {
         super.init()
-        // 先激活音频会话再连引擎：会话未激活时主混音器输出采样率为 0，
-        // 直接按 24k 连接会抛 com.apple.coreaudio.avfaudio（-10868 格式不支持）。
-        // voiceChat 自带回声消除，但会把输出压到通话音量；音量不足改在
-        // 播放侧做软件增益（playbackGain），不切模式（切 .default 时混音器
-        // 输出格式不稳，AVAudioEngine connect 会抛异常直接崩）。
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .voiceChat,
-                                 options: [.defaultToSpeaker, .allowBluetooth])
-        try? session.setActive(true)
+        // 会话类别与播放接线推迟到 start(mic:)：打字输入只开播放，不激活麦克风。
         engine.attach(player)
-        let mixer = engine.mainMixerNode
-        let fmt = mixer.outputFormat(forBus: 0)
-        if fmt.sampleRate > 0 {
-            mixFormat = fmt
-            engine.connect(player, to: mixer, format: fmt)
-            // 24k Int16 → 混音器格式（通常 48k Float32）
-            playbackConverter = AVAudioConverter(from: playbackFormat, to: fmt)
-        }
         NotificationCenter.default.addObserver(
             self, selector: #selector(onInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
@@ -68,35 +53,37 @@ final class AudioController: NSObject {
 
     // MARK: - 生命周期
 
-    func start() {
+    /// 开音频。mic=false 只开播放（打字输入，完全不收音）。
+    func start(mic: Bool) {
         guard !running else { return }
-        let session = AVAudioSession.sharedInstance()
-        // voiceChat 模式自带回声消除/降噪
-        try? session.setCategory(.playAndRecord, mode: .voiceChat,
-                                 options: [.defaultToSpeaker, .allowBluetooth])
-        try? session.setActive(true)
-
-        let input = engine.inputNode
-        let hwFormat = input.outputFormat(forBus: 0)
-        inputSampleRate = hwFormat.sampleRate
-        converter = AVAudioConverter(from: hwFormat, to: captureFormat)
-        carry.removeAll()
-        input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buf, _ in
-            self?.processMic(buf)
-        }
+        activateSession(mic: mic)
+        if mic { installTap() }
         do {
             try engine.start()
             player.play()
             running = true
         } catch {
-            try? session.setActive(false)
+            try? AVAudioSession.sharedInstance().setActive(false)
         }
+    }
+
+    /// 运行中切换是否收音：换类别会改主混音器格式，必须停引擎→重接→再起。
+    func setMicEnabled(_ on: Bool) {
+        guard running, on != tapInstalled else { return }
+        engine.stop()
+        if !on { removeTap() }
+        activateSession(mic: on)
+        if on { installTap() }
+        do {
+            try engine.start()
+            player.play()
+        } catch { /* 起不来就停在停止态，下次 start/stop 重建 */ }
     }
 
     func stop() {
         guard running else { return }
         running = false
-        engine.inputNode.removeTap(onBus: 0)
+        removeTap()
         engine.stop()
         playQueue.sync {
             gen &+= 1
@@ -105,6 +92,47 @@ final class AudioController: NSObject {
         }
         player.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// 会话类别 + 播放节点接线。类别一变主混音器输出格式就变，必须按新格式重接，
+    /// 否则 AVAudioEngine.connect 直接抛 -10868（格式不支持）。
+    private func activateSession(mic: Bool) {
+        let session = AVAudioSession.sharedInstance()
+        if mic {
+            // voiceChat 自带回声消除/降噪，但会把输出压到通话音量；
+            // 音量不足改在播放侧做软件增益（playbackGain），不切模式。
+            try? session.setCategory(.playAndRecord, mode: .voiceChat,
+                                     options: [.defaultToSpeaker, .allowBluetooth])
+        } else {
+            try? session.setCategory(.playback, mode: .default, options: [])
+        }
+        try? session.setActive(true)
+        engine.disconnectNodeOutput(player)
+        let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        guard fmt.sampleRate > 0 else { return }
+        mixFormat = fmt
+        engine.connect(player, to: engine.mainMixerNode, format: fmt)
+        // 24k Int16 → 混音器格式（通常 48k Float32）
+        playbackConverter = AVAudioConverter(from: playbackFormat, to: fmt)
+    }
+
+    private func installTap() {
+        guard !tapInstalled else { return }
+        let input = engine.inputNode
+        let hwFormat = input.outputFormat(forBus: 0)
+        inputSampleRate = hwFormat.sampleRate
+        converter = AVAudioConverter(from: hwFormat, to: captureFormat)
+        carry.removeAll()
+        input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buf, _ in
+            self?.processMic(buf)
+        }
+        tapInstalled = true
+    }
+
+    private func removeTap() {
+        guard tapInstalled else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        tapInstalled = false
     }
 
     // MARK: - 采集：硬件格式 → 16k Float32 → 512 样本 Int16 帧
@@ -163,17 +191,6 @@ final class AudioController: NSObject {
         playQueue.async {
             guard turn != self.currentTurn else { return }
             self.currentTurn = turn
-            self.gen &+= 1
-            self.pending = 0
-            self.ttsEndReceived = false
-            self.player.stop()
-            if self.running { self.player.play() }
-        }
-    }
-
-    /// 切到文字作答：丢弃在途音频，上一轮的回答不再继续播
-    func flushPlayback() {
-        playQueue.async {
             self.gen &+= 1
             self.pending = 0
             self.ttsEndReceived = false

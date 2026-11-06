@@ -21,8 +21,9 @@ final class ChatViewModel: ObservableObject {
     @Published var orbLevel: Float = 0
     @Published var voice = "zh-CN-XiaoxiaoNeural"
     @Published var rate = "+30%"
-    /// 作答形态：text=只说文字（默认，2026-11-06 定）｜voice=合成语音播报
-    @Published var replyMode = "text"
+    /// 输入形态：text=打字（默认，不收音）｜voice=说话（收音）
+    /// 两种模式回答都出声播报。
+    @Published var inputMode = "text"
 
     let serverAddr: String
     let serverToken: String
@@ -72,40 +73,64 @@ final class ChatViewModel: ObservableObject {
             isLive = true
             statusText = "连接中…"
             UIApplication.shared.isIdleTimerDisabled = true   // 对话中不锁屏
-            if !audio.running {
-                AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        if granted {
-                            self.audio.start()
-                            self.connectAndStart()
-                        } else {
-                            self.addLine(.error, "无麦克风权限，请到系统设置开启")
-                            self.stopAll(status: "无麦克风权限")
-                        }
-                    }
-                }
-            } else {
+            if audio.running {
                 connectAndStart()
+            } else {
+                startAudio()
+            }
+        }
+    }
+
+    /// 按输入形态开音频：打字模式只开播放（不收音），语音模式才申请麦克风
+    private func startAudio() {
+        guard inputMode == "voice" else {
+            audio.start(mic: false)
+            connectAndStart()
+            return
+        }
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            Task { @MainActor in
+                guard let self else { return }
+                if granted {
+                    self.audio.start(mic: true)
+                    self.connectAndStart()
+                } else {
+                    self.addLine(.error, "无麦克风权限，请到系统设置开启")
+                    self.stopAll(status: "无麦克风权限")
+                }
             }
         }
     }
 
     func interrupt() { ws.send(json: ["type": "interrupt"]) }
 
-    /// 音色/语速/作答形态改了即时同步（对齐 web pushConfig）
+    /// 音色/语速改了即时同步（对齐 web pushConfig）
     func pushConfig() {
         guard ws.isOpen else { return }
-        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate,
-                       "reply": replyMode])
+        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate])
     }
 
-    /// 切换作答形态：切到文字时丢掉在途音频，上一轮的语音不再继续播
-    func setReplyMode(_ mode: String) {
-        guard mode != replyMode else { return }
-        replyMode = mode
-        if mode == "text" { audio.flushPlayback() }
-        pushConfig()
+    /// 切换输入形态：打字=停麦克风（不收音），语音=开麦克风接着听。回答始终出声。
+    func setInputMode(_ mode: String) {
+        guard mode != inputMode else { return }
+        inputMode = mode
+        if !isLive { return }          // 未开始：下次开始时按新形态起音频
+        if mode == "voice" {
+            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if granted {
+                        self.audio.setMicEnabled(true)
+                    } else {
+                        self.addLine(.error, "无麦克风权限，请到系统设置开启")
+                        self.inputMode = "text"
+                        self.audio.setMicEnabled(false)
+                    }
+                }
+            }
+        } else {
+            audio.setMicEnabled(false)
+        }
     }
 
     func newSession() {
@@ -188,8 +213,7 @@ final class ChatViewModel: ObservableObject {
     private func didConnect() {
         reconnectDelay = 1
         statusText = "已连接"
-        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate,
-                       "reply": replyMode])
+        ws.send(json: ["type": "set_config", "voice": voice, "tts_rate": rate])
         if let t = pendingText {
             pendingText = nil
             ws.send(json: ["type": "text", "text": t])
@@ -284,12 +308,7 @@ final class ChatViewModel: ObservableObject {
         case "tts_sentence":
             break   // 预留：逐句高亮
         case "tts_end":
-            if replyMode == "text" {
-                // 文字模式下服务端不出音频；若对面还是语音版，立刻回执让它别再等（音频已丢弃）
-                if let turn = msg["turn"] as? Int {
-                    ws.send(json: ["type": "playback_done", "turn": turn])
-                }
-            } else if let turn = msg["turn"] as? Int {
+            if let turn = msg["turn"] as? Int {
                 audio.markTtsEnd(turn: turn)
             }
         case "replaced":
@@ -306,7 +325,6 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func handleBinary(_ data: Data) {
-        guard replyMode == "voice" else { return }   // 文字作答：下行音频一律不播
         guard data.count > 2, data[0] == 0x01 else { return }
         let turn = Int(data[1])
         audio.enqueue(turn: turn, pcm: data.subdata(in: 2..<data.count))

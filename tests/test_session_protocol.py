@@ -256,38 +256,6 @@ def test_tts_failure_still_closes_the_turn():
          tts=FlakyTTS(fail_from=2))
 
 
-class NoTTS:
-    """文字作答分支下 TTS 一秒都不该跑：一旦被调用即判失败。"""
-
-    async def synth_stream(self, sentence):
-        raise AssertionError(f"文字作答不该合成语音：{sentence!r}")
-        yield b""
-
-
-def test_text_reply_mode_sends_no_audio():
-    """reply=text（手机端默认）：只推 agent_delta，不出 tts_sentence/音频/tts_end，
-    agent_done 后直接回 listening，不等 playback_done。"""
-    async def scenario(s, outbox, hermes):
-        events: list = []
-        await s.on_control({"type": "set_config", "reply": "text"})
-        hi = await _until(outbox, events, _is("hello"), 2, "hello")
-        assert events[hi][1].get("reply") == "text"
-        await s.on_control({"type": "start"})
-        await _until(outbox, events, _is("state", "listening"), 2, "listening")
-        events.clear()
-        turn = s.turn + 1
-        await s.on_control({"type": "text", "text": "在吗"})
-        done = await _until(outbox, events, _is("agent_done"), 2, "agent_done")
-        li = await _until(outbox, events, _is("state", "listening"), 2, "回 listening")
-        assert not any(e[0] == "bin" for e in events), "文字作答不该下发音频"
-        types = _types(events)
-        assert "tts_sentence" not in types and "tts_end" not in types, types
-        assert "agent_delta" in types, "文字靠 agent_delta 上屏"
-        assert li > done, "必须 agent_done 之后再收口"
-        assert events[li][1]["turn"] == turn, events[li]
-    _run(scenario, tts=NoTTS())
-
-
 def test_uplink_dropped_once_outbound_is_dead():
     """半开隧道（手机息屏）：出站写失败后 read 侧还能继续送麦克风帧，heartbeat 判死要 ~30s。
     这期间再起话轮，就是给一个永远收不到回音的连接白烧网关 token。"""

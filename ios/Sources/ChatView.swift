@@ -56,6 +56,16 @@ struct ChatView: View {
 
     private var isWorking: Bool { vm.state == "thinking" || vm.state == "speaking" }
 
+    private var stateText: String {
+        guard vm.inputMode == "text" else { return Self.stateLabel[vm.state] ?? vm.state }
+        switch vm.state {
+        case "listening": return "打字输入，回车发送"
+        case "thinking": return "Hermes 思考中…"
+        case "speaking": return "播放回答中…（点「打断」可停）"
+        default: return "已暂停"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -106,32 +116,24 @@ struct ChatView: View {
             }
             HStack(spacing: 8) {
                 Menu {
-                    Button("文字作答（不出声）") { vm.setReplyMode("text") }
-                    Button("语音作答（朗读回答）") { vm.setReplyMode("voice") }
+                    ForEach(Self.voices, id: \.0) { v in
+                        Button(v.1) {
+                            vm.voice = v.0
+                            vm.pushConfig()
+                        }
+                    }
                 } label: {
-                    MenuChip(text: vm.replyMode == "text" ? "文字作答" : "语音作答")
+                    MenuChip(text: Self.voices.first { $0.0 == vm.voice }?.1 ?? "音色")
                 }
-                if vm.replyMode == "voice" {
-                    Menu {
-                        ForEach(Self.voices, id: \.0) { v in
-                            Button(v.1) {
-                                vm.voice = v.0
-                                vm.pushConfig()
-                            }
+                Menu {
+                    ForEach(Self.rates, id: \.0) { r in
+                        Button(r.1) {
+                            vm.rate = r.0
+                            vm.pushConfig()
                         }
-                    } label: {
-                        MenuChip(text: Self.voices.first { $0.0 == vm.voice }?.1 ?? "音色")
                     }
-                    Menu {
-                        ForEach(Self.rates, id: \.0) { r in
-                            Button(r.1) {
-                                vm.rate = r.0
-                                vm.pushConfig()
-                            }
-                        }
-                    } label: {
-                        MenuChip(text: Self.rates.first { $0.0 == vm.rate }?.1 ?? "语速")
-                    }
+                } label: {
+                    MenuChip(text: Self.rates.first { $0.0 == vm.rate }?.1 ?? "语速")
                 }
                 Spacer(minLength: 4)
                 Button("打断") { vm.interrupt() }
@@ -193,7 +195,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
 
-            Text(Self.stateLabel[vm.state] ?? vm.state)
+            Text(stateText)
                 .font(.system(size: 13))
                 .foregroundColor(Theme.dim)
                 .frame(minHeight: 20)
@@ -277,7 +279,20 @@ struct ChatView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            TextField("也可以打字（回车发送）…", text: $textIn)
+            // 输入形态：键盘=打字（不收音）｜话筒=说话（收音）。回答一律出声。
+            Button { vm.setInputMode(vm.inputMode == "text" ? "voice" : "text") } label: {
+                Image(systemName: vm.inputMode == "text" ? "keyboard" : "mic.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(vm.inputMode == "voice" ? .white : Theme.fg)
+                    .frame(width: 40, height: 34)
+                    .background(vm.inputMode == "voice" ? Theme.user : Theme.panel)
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(vm.inputMode == "voice" ? Theme.user : Theme.line, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            TextField(vm.inputMode == "text" ? "打字，回车发送…" : "也可以打字（回车发送）…",
+                      text: $textIn)
                 .font(.system(size: 14))
                 .foregroundColor(Theme.fg)
                 .textFieldStyle(.plain)
