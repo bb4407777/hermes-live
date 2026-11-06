@@ -24,6 +24,8 @@ final class AudioController: NSObject {
         commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
     private let playbackFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false)!
+    /// 播放增益：voiceChat 模式输出电平被压得很低，入队时整体放大并削顶。
+    private let playbackGain: Float = 2.6
 
     // 采集侧
     private var carry: [Float] = []
@@ -41,8 +43,11 @@ final class AudioController: NSObject {
 
     override init() {
         super.init()
-        // 先激活音频会话再连引擎：voiceChat 模式下主混音器只接受它自己的输出格式，
+        // 先激活音频会话再连引擎：会话未激活时主混音器输出采样率为 0，
         // 直接按 24k 连接会抛 com.apple.coreaudio.avfaudio（-10868 格式不支持）。
+        // voiceChat 自带回声消除，但会把输出压到通话音量；音量不足改在
+        // 播放侧做软件增益（playbackGain），不切模式（切 .default 时混音器
+        // 输出格式不稳，AVAudioEngine connect 会抛异常直接崩）。
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .voiceChat,
                                  options: [.defaultToSpeaker, .allowBluetooth])
@@ -66,7 +71,7 @@ final class AudioController: NSObject {
     func start() {
         guard !running else { return }
         let session = AVAudioSession.sharedInstance()
-        // voiceChat 模式自带回声消除/降噪（对齐 web 的 echoCancellation 等约束）
+        // voiceChat 模式自带回声消除/降噪
         try? session.setCategory(.playAndRecord, mode: .voiceChat,
                                  options: [.defaultToSpeaker, .allowBluetooth])
         try? session.setActive(true)
@@ -176,7 +181,13 @@ final class AudioController: NSObject {
             else { return }
             src.frameLength = AVAudioFrameCount(frames)
             if let dst = src.int16ChannelData?[0] {
-                pcm.copyBytes(to: UnsafeMutableBufferPointer(start: dst, count: frames))
+                pcm.withUnsafeBytes { raw in
+                    let s = raw.bindMemory(to: Int16.self)
+                    for i in 0..<frames {
+                        let v = Float(s[i]) * self.playbackGain
+                        dst[i] = Int16(max(-32768, min(32767, v)))
+                    }
+                }
             }
 
             // 播放节点按混音器格式连接，24k 帧要先转过去再排
