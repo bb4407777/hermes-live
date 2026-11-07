@@ -154,7 +154,7 @@ final class ChatViewModel: ObservableObject {
         if ws.isOpen {
             ws.send(json: ["type": "text", "text": t])
         } else {
-            ws.connect(addr: serverAddr, token: serverToken)
+            ws.connect(addr: serverAddr, token: serverToken, sid: sid)
             pendingText = t
         }
     }
@@ -244,10 +244,9 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func handleClose(_ code: Int?) {
-        if code == 4001 {
-            // 被新连接顶替（服务端单活跃连接）：退场，不与新端互踢
-            addLine(.tool, "已在其他端打开，本端停止")
-            stopAll(status: "已在其他端打开，本端停止")
+        if code == 4002 {
+            // 服务端空闲回收（4 小时无上行）：停机不重连，用户再点即起新会话
+            stopAll(status: "长时间未使用，会话已关闭")
             return
         }
         setState("idle")
@@ -268,7 +267,7 @@ final class ChatViewModel: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             self.reconnectTask = nil
             guard self.isLive else { return }
-            self.ws.connect(addr: self.serverAddr, token: self.serverToken)
+            self.ws.connect(addr: self.serverAddr, token: self.serverToken, sid: self.sid)
         }
     }
 
