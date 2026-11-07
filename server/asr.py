@@ -369,6 +369,16 @@ class SherpaStreamingASR:
         if self._recognizer is not None:
             self._stream = self._recognizer.create_stream()
 
+    def spawn(self) -> "SherpaStreamingASR":
+        """多设备并发用：复用已加载的 recognizer 权重，另开一条 stream。
+
+        recognizer 只读、可共享；stream 是会话态，必须一连接一条，
+        否则两路音频在同一流里交错解码，出字互相污染。"""
+        other = SherpaStreamingASR(self.cfg)
+        other._recognizer = self._recognizer
+        other._stream = self._recognizer.create_stream() if self._recognizer is not None else None
+        return other
+
     @property
     def available(self) -> bool:
         return self._recognizer is not None

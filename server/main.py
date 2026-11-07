@@ -237,18 +237,12 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=30, max_msg_size=4 * 1024 * 1024)
     await ws.prepare(request)
     app = request.app
-    # 单活跃连接：单用户工具，新连接顶替旧连接。手机端常见双连接
-    # （autostart 与手点竞态、旧标签页残留），两个 Session 并存会抢 ASR 链路。
-    # 不能从这里直接 old_ws.close()——跨协程 close 发不出正常关闭帧（客户端收
-    # 1006，当普通断线重连→互踢循环）。改发应用层 replaced（走旧连接自己的
-    # writer，保证送达顺序），旧前端收到后自己退场；同时把旧 Session 打回
-    # idle，僵尸连接即使不关也不再处理音频，最终由 heartbeat 超时清理。
+    # 多设备并行：每个 WS 连接一个独立 Session（2026-11-07 高律师令：手机与电脑同时用）。
+    # 有状态的东西一律按连接隔离——ASR 的 queue/future/task、hermes 会话 id、turn 与 outbox；
+    # 只有本身无会话态、可并发复用的引擎留在 app 级共享（TTS、批量 ASR、sherpa recognizer）。
+    # 早期版本是单活跃连接（新连接顶替旧连接），两个 Session 抢同一条 ASR 链路会互相
+    # reset 导致空结果/窜流；下面这些共享点逐个改成按连接实例后即可并存。
     live = app["live_state"]   # 启动后 app[...] 不可写（aiohttp 弃用），状态挂可变 dict
-    old_session: Session | None = live["session"]
-    if old_session is not None and not old_session.closed:
-        logger.info("ws replaced: 旧连接退场")
-        old_session.send_json("replaced")
-        await old_session.on_control({"type": "stop"})
     outbox: asyncio.Queue = asyncio.Queue()
     # doubao ASR 按连接实例化（load 仅读凭据文件，轻量）：
     # 会话态 queue/future/task 决不跨连接共享，否则互相 reset/覆盖导致空结果与窜流
@@ -257,15 +251,19 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     if probe is not None and probe.available:
         doubao = DoubaoStreamingASR(app["cfg"])
         doubao.load()
-    session = Session(app["cfg"], app["asr"], app["tts"], app["hermes"], outbox,
-                      asr_stream=app.get("asr_stream"),
+    # hermes 客户端同样按连接实例化：session_id 是实例字段，共享会让两路对话串历史
+    hermes = HermesClient(app["cfg"], app["http"])
+    # sherpa 的 recognizer 权重共享，stream 必须各一条（load 重、create_stream 轻）
+    asr_stream = app["asr_stream"].spawn() if app.get("asr_stream") else None
+    session = Session(app["cfg"], app["asr"], app["tts"], hermes, outbox,
+                      asr_stream=asr_stream,
                       doubao_asr=doubao,
                       qwen_asr=app.get("qwen_asr"))
-    live["session"] = session
+    live["sessions"].add(session)
     writer = asyncio.create_task(ws_writer(ws, outbox, session))
-    session.send_json("hello", session_id=app["hermes"].session_id,
+    session.send_json("hello", session_id=hermes.session_id,
                       voice=app["cfg"].tts_voice, asr_model=session.asr_label())
-    logger.info("ws connected")
+    logger.info("ws connected（活跃连接 %d）", len(live["sessions"]))
     try:
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.BINARY:
@@ -281,8 +279,7 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
     finally:
-        if live["session"] is session:
-            live["session"] = None
+        live["sessions"].discard(session)
         await session.close()
         outbox.put_nowait(None)
         with contextlib.suppress(Exception):
@@ -296,7 +293,7 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
 def build_app(cfg, preload: bool = True) -> web.Application:
     app = web.Application(middlewares=[no_cache_assets])
     app["cfg"] = cfg
-    app["live_state"] = {"session": None}   # 当前活跃 WS 的 Session（单活跃连接）
+    app["live_state"] = {"sessions": set()}   # 全部活跃 WS 的 Session（多设备并行）
     app["asr"] = ASR(cfg)
     app["asr_stream"] = SherpaStreamingASR(cfg)
     app["doubao_asr"] = DoubaoStreamingASR(cfg)
