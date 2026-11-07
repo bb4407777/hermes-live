@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] - 2026-11-07
+
+### Added
+- **多设备多会话并存**：去掉「新连接顶替旧连接」，每个 WS 一条独立 Session（ASR 队列/future、hermes 会话 id、turn、outbox 全按连接隔离；TTS 与 sherpa recognizer 共享）。
+- **切后台只停音频、生成继续跑**：客户端上行 `detach` / `attach`，服务端把这轮跑完并把文字留底；回前台发 `replay` 补齐，不补播旧音频。网页、小程序、iOS 三端同步。
+- **断线回挂**：`ws?sid=<session_id>` 接回挂起会话，`detach_grace_min`（默认 30 分钟）内有效；超时关闭。
+- **空闲会话 4 小时自动关闭**：`session_idle_hours`，前端收 4002 停止重连。
+- **进程 24 小时自退重建**：`recycle_hours`，仅在无活跃会话时退出，由 launchd 立即拉起（防长跑漂移）。
+
 ## [未发布] - 2026-11-06
 
 ### Added

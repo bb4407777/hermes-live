@@ -37,6 +37,7 @@ Page({
 
   onLoad() {
     const app = getApp();
+    this._sid = wx.getStorageSync('hl_sid') || '';
     this.setData({
       server: app.globalData.server,
       token:  app.globalData.token,
@@ -47,9 +48,24 @@ Page({
   },
 
   onShow() {
+    // 已有会话且连接还在：直接接回（服务端把这轮补给我们）；否则自动开聊
+    if (this.data.running && this._ws && this.data.connected) {
+      this._sendJson({ type: 'attach' });
+      this._rec && this._rec.start();
+      return;
+    }
     // 每次进入页面自动开聊（已授权麦克风后静默开始，未授权则弹系统授权弹窗）
     if (!this.data.running && !this._connecting && !this.data.showSetup) {
       this._autoStart();
+    }
+  },
+
+  onHide() {
+    // 切后台：只停录音与播放，本轮生成照跑；回来用 sid 接回（不重开会话）
+    if (this.data.running) {
+      this._sendJson({ type: 'detach' });
+      if (this._rec) this._rec.stop();
+      if (this._player) this._player.stop && this._player.stop();
     }
   },
 
@@ -97,7 +113,10 @@ Page({
   _wsUrl() {
     let s = this.data.server.trim();
     if (!/^wss?:\/\//.test(s)) s = 'ws://' + s;
-    return `${s}/ws${this.data.token ? '?token=' + encodeURIComponent(this.data.token) : ''}`;
+    const q = [];
+    if (this.data.token) q.push('token=' + encodeURIComponent(this.data.token));
+    if (this._sid) q.push('sid=' + encodeURIComponent(this._sid));   // 有旧会话就回挂
+    return `${s}/ws${q.length ? '?' + q.join('&') : ''}`;
   },
 
   _connect() {
@@ -140,6 +159,11 @@ Page({
     });
   },
 
+  _rememberSid(id) {
+    this._sid = id || '';
+    try { wx.setStorageSync('hl_sid', this._sid); } catch (_) {}
+  },
+
   _sendJson(obj) { if (this._ws) this._ws.send({ data: JSON.stringify(obj) }); },
 
   _handleBinary(buf) {
@@ -150,7 +174,23 @@ Page({
   _handleJson(msg) {
     switch (msg.type) {
       case 'hello':
+        if (msg.session_id) this._rememberSid(msg.session_id);
         if (msg.note) this._addMsg('tool', msg.note);
+        break;
+      case 'replay':
+        // 切后台/断线回来：补齐挂起期间跑出来的那一轮（只补文字，不补播音频）
+        if (msg.session_id) this._rememberSid(msg.session_id);
+        if (msg.turn !== undefined) { this._agentTurn = msg.turn; this._player.setTurn(msg.turn); }
+        if (msg.asr_text) this._addMsg('user', msg.asr_text);
+        if (msg.text) {
+          const id = this._addMsg('agent', msg.text);
+          this._agentMsgId = msg.done ? null : id;
+          this._agentTurn = msg.turn;
+        }
+        this.setData({
+          state: msg.state || 'listening',
+          stateLabel: STATE_LABEL[msg.state] || '聆听中',
+        });
         break;
       case 'state': {
         const st = msg.state;
@@ -228,6 +268,7 @@ Page({
 
   _stopAll() {
     this._sendJson({ type: 'stop' });
+    this._rememberSid('');   // 主动结束＝这条会话用完
     if (this._rec) this._rec.stop();
     this.setData({ running: false, state: 'idle', stateLabel: STATE_LABEL.idle, canInterrupt: false });
   },

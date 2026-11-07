@@ -118,7 +118,10 @@ idle ──start──> listening ──VAD 段尾/文字──> thinking ──
   - `{"type": "tts_end", "turn": N}`：**本 turn 音频已全部下发**（不是"已播完"）。客户端必须
     等它 + 本地缓冲排空后才回 `playback_done`——早回会让服务端提前回 listening，喇叭还在播，
     自己的 TTS 被录进下一轮
-  - `{"type": "replaced"}`：服务端单活跃连接，本页被新页面顶替，应主动退场不再重连
+  - `{"type": "replay", "session_id": "...", "turn": N, "state": "...", "asr_text": "...", "text": "...", "done": bool}`：
+    回挂补齐——切后台/断线后带 `?sid=` 回来时，把挂起期间这一轮已生成的文字一次交还（音频不补播）
+  - 客户端上行 `{"type": "detach"}` / `{"type": "attach"}`：切后台只停麦克风与播放、本轮继续生成；
+    回前台接回出站并收 replay。断线重连走 `ws?sid=<session_id>`，服务端在 `detach_grace_min`（默认 30 分钟）内保留会话
   - `{"type": "restarting"}` / `{"type": "error", "message": "..."}`
 
 ## 客户端支持
@@ -362,7 +365,7 @@ curl -X POST http://127.0.0.1:8698/api/restart \
 ### 已知问题
 
 1. ~~doubao ASR 连接偶尔失败/空结果~~（2026-08-11 已修：根因是 app 级单例被多连接共享互踩 +
-   空闲 ~40s 被豆包远端掐流；现按连接实例化 + VAD start 懒建连 + 单活跃连接 + 前端断线自愈）
+   空闲 ~40s 被豆包远端掐流；现按连接实例化 + VAD start 懒建连 + 多设备并行 + 挂起回挂 + 前端断线自愈）
 2. ~~跨案串历史~~（2026-09-19 已修：不带 `X-Hermes-Session-Id` 时网关按
    `sha256(system_prompt+首句)` 派生会话身份，固定开场白会复活陈年会话；现**每条 WS 连接**
    铸造 `hl-<uuid16>`，「新会话」再轮换一次。

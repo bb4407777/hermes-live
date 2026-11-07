@@ -299,3 +299,39 @@ def test_uplink_dropped_once_outbound_is_dead():
         assert s.turn == 0, "出站已死却还在起话轮"
         assert outbox.empty(), "closed 之后还在往 outbox 塞消息"
     _run(scenario)
+
+
+def test_detach_keeps_turn_and_replay_on_attach():
+    """切后台（detach）只停音频出站：本轮生成照跑、文字留底；
+    回前台（attach）把这一轮已生成的全文一次交还，音频不补播。"""
+    async def scenario(s, outbox, hermes):
+        events: list = []
+        await s.on_control({"type": "start"})
+        await s.on_control({"type": "text", "text": "帮我查下合同相对性"})
+        await _until(outbox, events, _is("agent_delta"), 5, "首个 delta")
+
+        s.detach()                       # 模拟切后台
+        assert s._sink is None
+        await asyncio.sleep(0.05)
+        while not outbox.empty():
+            outbox.get_nowait()
+
+        # 生成照跑：等这轮在后台跑完
+        for _ in range(200):
+            if s.state not in ("thinking", "speaking"):
+                break
+            await asyncio.sleep(0.02)
+        assert s.state == "listening", f"后台轮没跑完，停在 {s.state}"
+        assert s.turn_text, "挂起期间没有留底文字"
+        assert outbox.empty(), "挂起期间不该再往旧 outbox 塞东西"
+
+        newbox: asyncio.Queue = asyncio.Queue()
+        s.attach(newbox)                 # 模拟回前台
+        s.send_replay()
+        kind, payload = await asyncio.wait_for(newbox.get(), timeout=2)
+        rp = json.loads(payload)
+        assert rp["type"] == "replay"
+        assert rp["session_id"] == hermes.session_id
+        assert rp["text"] == s.turn_text and rp["done"] is True
+
+    _run(scenario)

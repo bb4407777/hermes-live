@@ -246,27 +246,39 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     # reset 导致空结果/窜流；下面这些共享点逐个改成按连接实例后即可并存。
     live = app["live_state"]   # 启动后 app[...] 不可写（aiohttp 弃用），状态挂可变 dict
     outbox: asyncio.Queue = asyncio.Queue()
-    # doubao ASR 按连接实例化（load 仅读凭据文件，轻量）：
-    # 会话态 queue/future/task 决不跨连接共享，否则互相 reset/覆盖导致空结果与窜流
-    doubao = None
-    probe = app.get("doubao_asr")
-    if probe is not None and probe.available:
-        doubao = DoubaoStreamingASR(app["cfg"])
-        doubao.load()
-    # hermes 客户端同样按连接实例化：session_id 是实例字段，共享会让两路对话串历史
-    hermes = HermesClient(app["cfg"], app["http"])
-    # sherpa 的 recognizer 权重共享，stream 必须各一条（load 重、create_stream 轻）
-    asr_stream = app["asr_stream"].spawn() if app.get("asr_stream") else None
-    session = Session(app["cfg"], app["asr"], app["tts"], hermes, outbox,
-                      asr_stream=asr_stream,
-                      doubao_asr=doubao,
-                      qwen_asr=app.get("qwen_asr"))
-    live["sessions"].add(session)
+    # 回挂：带 ?sid= 且该会话还在挂起池里 → 接回原会话（本轮生成照跑，文字留底）
+    sid = request.query.get("sid") or ""
+    session = live["detached"].pop(sid, None) if sid else None
+    if session is not None and session.closed:
+        session = None
+    if session is not None:
+        session.attach(outbox)
+        logger.info("ws reattached sid=%s（活跃连接 %d）", sid, len(live["sessions"]))
+    else:
+        # doubao ASR 按连接实例化（load 仅读凭据文件，轻量）：
+        # 会话态 queue/future/task 决不跨连接共享，否则互相 reset/覆盖导致空结果与窜流
+        doubao = None
+        probe = app.get("doubao_asr")
+        if probe is not None and probe.available:
+            doubao = DoubaoStreamingASR(app["cfg"])
+            doubao.load()
+        # hermes 客户端同样按连接实例化：session_id 是实例字段，共享会让两路对话串历史
+        hermes = HermesClient(app["cfg"], app["http"])
+        # sherpa 的 recognizer 权重共享，stream 必须各一条（load 重、create_stream 轻）
+        asr_stream = app["asr_stream"].spawn() if app.get("asr_stream") else None
+        session = Session(app["cfg"], app["asr"], app["tts"], hermes, outbox,
+                          asr_stream=asr_stream,
+                          doubao_asr=doubao,
+                          qwen_asr=app.get("qwen_asr"))
+        live["sessions"].add(session)
     session.ws = ws
     session.last_active = time.monotonic()
     writer = asyncio.create_task(ws_writer(ws, outbox, session))
-    session.send_json("hello", session_id=hermes.session_id,
-                      voice=app["cfg"].tts_voice, asr_model=session.asr_label())
+    if sid and session.detached is False and session.turn > 0:
+        session.send_replay()
+    else:
+        session.send_json("hello", session_id=session.hermes.session_id,
+                          voice=app["cfg"].tts_voice, asr_model=session.asr_label())
     logger.info("ws connected（活跃连接 %d）", len(live["sessions"]))
     try:
         async for msg in ws:
@@ -284,27 +296,37 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
     finally:
-        live["sessions"].discard(session)
-        await session.close()
+        session.ws = None
         outbox.put_nowait(None)
         with contextlib.suppress(Exception):
             await asyncio.wait_for(writer, timeout=2)
         if not writer.done():
             writer.cancel()
-        logger.info("ws closed")
+        grace = app["cfg"].detach_grace_min
+        if grace > 0 and not session.closed:
+            # 切后台/断网：会话挂起，生成跑完写进留底，等 ?sid= 回来续上
+            session.detach()
+            live["detached"][session.hermes.session_id] = session
+            logger.info("ws closed → 会话挂起 %.0f 分钟（挂起池 %d）",
+                        grace, len(live["detached"]))
+        else:
+            live["sessions"].discard(session)
+            await session.close()
+            logger.info("ws closed")
     return ws
 
 
 async def _housekeeping(app: web.Application) -> None:
-    """两件事：① 空闲会话回收（session_idle_hours，同微信侧 4 小时口径）；
-    ② 进程到龄自退（recycle_hours，仅在无活跃会话时，launchd 立刻拉起新进程）。
+    """三件事：① 空闲会话回收（session_idle_hours，同微信侧 4 小时口径）；
+    ② 挂起池超时回收（detach_grace_min：切后台的会话回来太晚就关掉）；
+    ③ 进程到龄自退（recycle_hours，仅在无活跃会话时，launchd 立刻拉起新进程）。
 
     ①只断开连接、不杀进程；前端收到 4002 后不自动重连，用户再点开始即起一条全新会话。
     """
     cfg = app["cfg"]
     idle = cfg.session_idle_hours * 3600
     recycle = cfg.recycle_hours * 3600
-    spans = [s for s in (idle, recycle) if s > 0]
+    spans = [v for v in (idle, recycle, cfg.detach_grace_min * 60) if v > 0]
     if not spans:
         return
     tick = min(60.0, max(1.0, min(spans) / 8))   # 4 小时口径＝每分钟扫一次
@@ -322,7 +344,17 @@ async def _housekeeping(app: web.Application) -> None:
                 with contextlib.suppress(Exception):
                     session.send_json("bye", reason="idle_timeout")
                     await asyncio.sleep(0.2)
+                    session.closed = True   # 标记：连接收尾时直接关，不再进挂起池
                     await session.ws.close(code=4002, message=b"idle timeout")
+        grace = cfg.detach_grace_min * 60
+        if grace > 0:
+            for sid, gone in list(app["live_state"]["detached"].items()):
+                if not gone.closed and now - gone.detached_at < grace:
+                    continue
+                app["live_state"]["detached"].pop(sid, None)
+                app["live_state"]["sessions"].discard(gone)
+                await gone.close()
+                logger.info("挂起会话超时关闭 sid=%s", sid)
         if recycle > 0 and not sessions:
             uptime = now - app["started_at"]
             if uptime >= recycle:
@@ -334,7 +366,10 @@ async def _housekeeping(app: web.Application) -> None:
 def build_app(cfg, preload: bool = True) -> web.Application:
     app = web.Application(middlewares=[no_cache_assets])
     app["cfg"] = cfg
-    app["live_state"] = {"sessions": set()}   # 全部活跃 WS 的 Session（多设备并行）
+    app["live_state"] = {
+        "sessions": set(),   # 全部会话（含挂起的，回收扫得到）
+        "detached": {},      # sid -> Session，断线待回挂
+    }
     app["asr"] = ASR(cfg)
     app["asr_stream"] = SherpaStreamingASR(cfg)
     app["doubao_asr"] = DoubaoStreamingASR(cfg)

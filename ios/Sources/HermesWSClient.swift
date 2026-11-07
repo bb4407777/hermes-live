@@ -15,7 +15,7 @@ final class HermesWSClient: NSObject {
     private var task: URLSessionWebSocketTask?
     private(set) var isOpen = false
 
-    func connect(addr: String, token: String) {
+    func connect(addr: String, token: String, sid: String = "") {
         close()
         var comp = URLComponents()
         var urlToken: String?
@@ -45,9 +45,10 @@ final class HermesWSClient: NSObject {
         }
         if comp.path.isEmpty { comp.path = "/ws" }
         let tk = token.isEmpty ? (urlToken ?? "") : token
-        if !tk.isEmpty {
-            comp.queryItems = [URLQueryItem(name: "token", value: tk)]
-        }
+        var items: [URLQueryItem] = []
+        if !tk.isEmpty { items.append(URLQueryItem(name: "token", value: tk)) }
+        if !sid.isEmpty { items.append(URLQueryItem(name: "sid", value: sid)) }  // 有旧会话就回挂
+        if !items.isEmpty { comp.queryItems = items }
         guard let url = comp.url else {
             onClose(nil)
             return

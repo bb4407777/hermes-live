@@ -50,6 +50,9 @@ class Session:
         self.tts = tts
         self.hermes = hermes
         self.outbox = outbox  # ("json", str) | ("bin", bytes)，由 ws 写协程串行发送
+        self._sink = outbox   # 实际出站口；挂起（后台/断线）时置 None，消息只留回放缓冲
+        self.detached = False
+        self.detached_at = 0.0
 
         self.state = "idle"
         self.turn = 0
@@ -65,17 +68,51 @@ class Session:
         self.closed = False
         self.ws = None                 # 所属 WS 连接，空闲回收时由 reaper 关闭
         self.last_active = 0.0         # 最近一次上行（音频/文字）的 monotonic 时间
+        self.turn_text = ""            # 本轮已生成的文字（挂起后回来靠它补齐气泡）
+        self.turn_asr = ""             # 本轮识别出的用户原话
         self._recent_tts_texts: list[tuple[float, str]] = []  # (timestamp, sentence) 回声过滤缓冲
 
     # ---------- 出站 ----------
 
     def send_json(self, type_: str, **kw) -> None:
-        if not self.closed:
-            self.outbox.put_nowait(("json", protocol.msg(type_, **kw)))
+        if self.closed:
+            return
+        # 文字留底：挂起期间客户端收不到，回来时靠回放补齐（音频不留，重连后不补播旧句）
+        if type_ == "agent_delta":
+            self.turn_text += str(kw.get("text") or "")
+        elif type_ == "asr_final":
+            self.turn_asr = str(kw.get("text") or "")
+        if self._sink is None:
+            return
+        self._sink.put_nowait(("json", protocol.msg(type_, **kw)))
 
     def send_audio(self, turn: int, pcm: bytes) -> None:
-        if not self.closed:
-            self.outbox.put_nowait(("bin", protocol.pack_audio_down(turn, pcm)))
+        if self.closed or self._sink is None:
+            return
+        self._sink.put_nowait(("bin", protocol.pack_audio_down(turn, pcm)))
+
+    # ---------- 挂起 / 回挂 ----------
+
+    def detach(self) -> None:
+        """客户端切后台或断线：只停音频与出站，本轮生成照常跑完。"""
+        if self.detached:
+            return
+        self.detached = True
+        self.detached_at = time.monotonic()
+        self._sink = None
+        self.barge.reset()
+
+    def attach(self, outbox: asyncio.Queue) -> None:
+        self.detached = False
+        self.detached_at = 0.0
+        self.outbox = outbox   # 回挂后出站口要跟着换，否则后续 attach 又指回旧队列
+        self._sink = outbox
+
+    def send_replay(self) -> None:
+        """回挂时把本轮进度一次性交给客户端：已在说的那轮补文字，不必补播音频。"""
+        self.send_json("replay", session_id=self.hermes.session_id, turn=self.turn,
+                       state=self.state, asr_text=self.turn_asr, text=self.turn_text,
+                       done=self.state not in ("thinking", "speaking"))
 
     def _set_state(self, state: str) -> None:
         self.state = state
@@ -117,7 +154,7 @@ class Session:
         # 出站已死（on_conn_lost 打的标记）就别再起话轮：send_json/send_audio 已被掐掉，
         # 这里却仍会照常 ASR + 打网关，为一个永远收不到回音的连接白烧 token，
         # 要等 heartbeat 把这条半开连接判死才停（最多 ~30s，期间每句话一轮）。
-        if self.closed:
+        if self.closed or self._sink is None:   # 挂起中不收音（没人听，也不该起新轮）
             return
         if self.state == "listening":
             if time.monotonic() < self.listen_ignore_until:
@@ -198,6 +235,16 @@ class Session:
                            asr_model=self.asr_label(), note="新会话")
             if self.state != "idle":
                 self._enter_listening()
+        elif t == "detach":
+            # 切后台：停音频出站与麦克风处理，本轮生成继续跑，文字留底
+            self.detach()
+            logger.info("客户端切后台，会话挂起（turn=%s）", self.turn)
+        elif t == "attach":
+            # 回前台：接回出站并把本轮进度补给它
+            self.attach(self.outbox)
+            self.last_active = time.monotonic()
+            self.send_replay()
+            logger.info("客户端回前台，会话接回（turn=%s）", self.turn)
         elif t == "playback_done":
             pt = int(obj.get("turn", -1))
             ev = self.playback_done.get(pt)
@@ -233,15 +280,14 @@ class Session:
             self.doubao_asr.reset()   # cancel 在途豆包会话任务，防连接关闭后泄漏
 
     def on_conn_lost(self) -> None:
-        """出站写失败时由 ws_writer 回告：停止出站 + 打断在途 turn。
+        """出站写失败时由 ws_writer 回告：先挂起（等客户端回来续上），别急着杀 turn。
 
-        不这么做的话 turn 协程会卡在等一个永不再来的 playback_done，
-        同时后续音频帧继续往无界 outbox 里堆。
+        以前直接 closed 是为了不给"永远收不到回音"的连接白烧 token；现在切后台是常态，
+        生成照跑、文字留底，回挂由 handle_ws 的 ?sid= 接手，超时才由 housekeeping 收尾。
         """
-        if self.closed:
+        if self.closed or self.detached:
             return
-        self.closed = True
-        asyncio.create_task(self._cancel_turn())
+        self.detach()
 
     # ---------- 状态迁移 ----------
 
@@ -263,6 +309,8 @@ class Session:
 
     def _begin_turn(self, pcm_utt: bytes | None = None, text: str | None = None) -> None:
         self.turn += 1
+        self.turn_text = ""
+        self.turn_asr = text or ""
         self._set_state("thinking")
         self.turn_task = asyncio.create_task(
             self._run_turn(self.turn, pcm_utt=pcm_utt, text=text))
@@ -353,7 +401,8 @@ class Session:
                     self.send_json("agent_delta", turn=t, text=ev.text)
                     for s in assembler.feed(ev.text):
                         m.mark("first_sentence")
-                        queue.put_nowait(s)
+                        if self._sink is not None:   # 挂起期间不合成音频，只留文字
+                            queue.put_nowait(s)
                 elif ev.kind == "tool":
                     if self.cfg.show_tool_progress:
                         tool = ev.tool or {}
@@ -369,7 +418,8 @@ class Session:
                     finish_reason = ev.finish_reason
             for s in assembler.flush():
                 m.mark("first_sentence")
-                queue.put_nowait(s)
+                if self._sink is not None:
+                    queue.put_nowait(s)
             queue.put_nowait(None)  # 收口哨兵
             self.send_json("agent_done", turn=t, finish_reason=finish_reason)
             await tts_task  # 等音频发完 + 客户端播完
@@ -477,8 +527,9 @@ class Session:
                 # 再加余量覆盖客户端抖动与网络。
                 est_end = max(first_send + dur, last_send)
                 remain = est_end - time.monotonic() + self.cfg.playback_grace_ms / 1000
-                with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(self.playback_done[t].wait(), timeout=max(0.5, remain))
+                if self._sink is not None:   # 已挂起就没人播，不必等 playback_done
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(self.playback_done[t].wait(), timeout=max(0.5, remain))
         finally:
             pf.cancel()
             if inflight and not inflight.done():

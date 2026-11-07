@@ -32,6 +32,7 @@ let ws = null;
 let curTurn = -1;
 let agentBubble = null;   // 当前 turn 的助手气泡
 let agentTurn = -1;
+let sid = sessionStorage.getItem('hl_sid') || '';   // 服务端会话 id：断线/切后台后靠它回挂
 
 const audio = new AudioIO({
   onFrame: (buf) => {
@@ -74,6 +75,14 @@ function dbgText() {
 }
 function dbgShow() { setStatus(dbgText()); }
 
+function rememberSid(id) {
+  sid = id || '';
+  try {
+    if (sid) sessionStorage.setItem('hl_sid', sid);
+    else sessionStorage.removeItem('hl_sid');
+  } catch { /* 隐私模式写不进 */ }
+}
+
 function addBubble(cls, text) {
   const div = document.createElement('div');
   div.className = `bubble ${cls}`;
@@ -108,8 +117,26 @@ function setState(state, turn) {
 function handleMessage(msg) {
   switch (msg.type) {
     case 'hello':
+      if (msg.session_id) rememberSid(msg.session_id);
       setStatus(`音色 ${msg.voice} · ASR ${msg.asr_model}` + (msg.note ? ` · ${msg.note}` : ''));
       break;
+    case 'replay': {
+      // 切后台/断线回来：把挂起期间跑出来的这一轮补齐（文字照填，音频不补播）
+      if (msg.session_id) rememberSid(msg.session_id);
+      if (msg.turn !== undefined) {
+        curTurn = msg.turn;
+        audio.setTurn(msg.turn);
+      }
+      if (msg.asr_text) addBubble('user', msg.asr_text);
+      if (msg.text) {
+        agentBubble = addBubble('agent', msg.text);
+        agentTurn = msg.turn;
+        els.transcript.scrollTop = els.transcript.scrollHeight;
+      }
+      setState(msg.state || 'listening', msg.turn);
+      setStatus(msg.done ? '已补回后台生成的回答' : '已接回后台正在生成的回答');
+      break;
+    }
     case 'state':
       setState(msg.state, msg.turn);
       break;
@@ -141,18 +168,19 @@ function handleMessage(msg) {
       // 否则句间 >300ms 的正常空隙会被当成播完，服务端提前回到 listening 吃到回声
       if (msg.turn === curTurn) audio.setTurnEnd(msg.turn);
       break;
-    case 'replaced':
-      // 服务端单活跃连接：本页被新页面顶替，主动退场，不再自动重连
-      wantLive = false;
-      clearReconnect();
-      audio.stop();
-      if (ws) ws.close();
-      setStatus('已在其他页面打开，本页停止');
-      setState('idle');
-      els.btnToggle.textContent = '开始对话';
-      break;
     case 'error':
       addLine('error', msg.message);
+      break;
+    case 'bye':
+      if (msg.reason === 'idle_timeout') {
+        wantLive = false;
+        clearReconnect();
+        rememberSid('');
+        audio.stop();
+        setStatus('长时间未使用，会话已关闭');
+        setState('idle');
+        els.btnToggle.textContent = '开始对话';
+      }
       break;
   }
 }
@@ -196,7 +224,10 @@ function connect() {
   if (connectPromise) return connectPromise;
   connectPromise = new Promise((resolve, reject) => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const socket = new WebSocket(`${proto}://${SERVER}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
+    const q = [];
+    if (TOKEN) q.push(`token=${encodeURIComponent(TOKEN)}`);
+    if (sid) q.push(`sid=${encodeURIComponent(sid)}`);   // 有旧会话就回挂，别新开
+    const socket = new WebSocket(`${proto}://${SERVER}/ws${q.length ? `?${q.join('&')}` : ''}`);
     ws = socket;
     socket.binaryType = 'arraybuffer';
     // 旧 socket 的回调可能在重连后才到（隧道抖动时尤其常见）。不判身份就会把新连接的
@@ -279,8 +310,17 @@ function scheduleReconnect() {
 // 只补 WS 不够：AudioContext 仍是 suspended，麦克风一帧不出、下行也不播，
 // 界面看着 listening 其实是死的。resume 必须在回前台的手势回调里补一次。
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !wantLive) return;
+  if (document.visibilityState === 'hidden') {
+    // 切后台：只停麦克风与播放，不杀 turn——服务端把这一轮跑完、文字留底
+    if (wantLive) {
+      sendJson({ type: 'detach' });
+      audio.setMicPaused(true);
+    }
+    return;
+  }
+  if (!wantLive) return;
   audio.resumeIfNeeded();
+  if (ws && ws.readyState === WebSocket.OPEN) sendJson({ type: 'attach' });
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     clearReconnect();
     scheduleReconnect();
@@ -293,6 +333,7 @@ async function toggle() {
     clearReconnect();
     sendJson({ type: 'stop' });
     await audio.stop();
+    rememberSid('');   // 主动结束＝这条会话用完，下次起新的
     els.btnToggle.textContent = '开始对话';
     setState('idle');
     return;

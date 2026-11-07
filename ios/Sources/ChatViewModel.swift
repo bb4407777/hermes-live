@@ -36,6 +36,8 @@ final class ChatViewModel: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var reconnectDelay: UInt64 = 1
     private var stoppedByBackground = false
+    /// 服务端会话 id：切后台/断线后靠它回挂，别再新开一条
+    private var sid: String = UserDefaults.standard.string(forKey: "hl_sid") ?? ""
 
     init(serverAddr: String, serverToken: String) {
         self.serverAddr = serverAddr
@@ -193,18 +195,29 @@ final class ChatViewModel: ObservableObject {
 
     private var pendingText: String?
 
-    /// 切出 App 就停录音：不留后台长连接，也不再占麦克风。
+    /// 切后台：只停麦克风与播放，本轮生成继续跑（服务端文字留底，回来补齐）。
     func pauseForBackground() {
         guard isLive else { return }
         stoppedByBackground = true
-        stopAll(status: "已切出，录音已停止")
+        ws.send(json: ["type": "detach"])
+        audio.stop()
+        statusText = "已切后台，回答继续生成"
     }
 
-    /// 回前台：切出时停过的自动续上；只是掉线的补一次连接。
+    /// 回前台：连接还在就接回这一轮；掉了就带 sid 重连（服务端挂起池里还在）。
     func resumeAfterForeground() {
         if stoppedByBackground {
             stoppedByBackground = false
-            if !isLive { toggle() }
+            if ws.isOpen {
+                _ = audio.start(mic: inputMode == "voice")
+                ws.send(json: ["type": "attach"])
+                statusText = "已接回后台生成的回答"
+            } else if !isLive {
+                toggle()
+            } else {
+                statusText = "重连中…"
+                connectAndStart()
+            }
             return
         }
         guard isLive, !ws.isOpen else { return }
@@ -214,7 +227,7 @@ final class ChatViewModel: ObservableObject {
 
     private func connectAndStart() {
         cancelReconnect()
-        ws.connect(addr: serverAddr, token: serverToken)
+        ws.connect(addr: serverAddr, token: serverToken, sid: sid)
     }
 
     private func didConnect() {
@@ -265,11 +278,17 @@ final class ChatViewModel: ObservableObject {
         reconnectDelay = 1
     }
 
+    private func rememberSid(_ id: String) {
+        sid = id
+        UserDefaults.standard.set(id, forKey: "hl_sid")
+    }
+
     private func stopAll(status: String) {
         isLive = false
         cancelReconnect()
         ws.send(json: ["type": "stop"])
         ws.close()
+        rememberSid("")   // 主动结束＝这条会话用完，下次起新的
         audio.stop()
         setState("idle")
         statusText = status
@@ -284,10 +303,23 @@ final class ChatViewModel: ObservableObject {
               let type = msg["type"] as? String else { return }
         switch type {
         case "hello":
+            rememberSid(msg["session_id"] as? String ?? "")
             let voice = msg["voice"] as? String ?? ""
             let asr = msg["asr_model"] as? String ?? ""
             let note = msg["note"] as? String ?? ""
             statusText = "音色 \(voice) · ASR \(asr)" + (note.isEmpty ? "" : " · \(note)")
+        case "replay":
+            // 切后台/断线回来：补齐挂起期间跑出来的这一轮（只补文字，不补播音频）
+            rememberSid(msg["session_id"] as? String ?? "")
+            if let turn = msg["turn"] as? Int { curTurn = turn }
+            if let asr = msg["asr_text"] as? String, !asr.isEmpty { addBubble(.user, asr) }
+            if let text = msg["text"] as? String, !text.isEmpty {
+                let bubble = addBubble(.agent, text)
+                agentBubbleId = (msg["done"] as? Bool == true) ? nil : bubble.id
+                agentTurn = msg["turn"] as? Int ?? -1
+            }
+            setState(msg["state"] as? String ?? "listening", turn: msg["turn"] as? Int)
+            statusText = (msg["done"] as? Bool == true) ? "已补回后台生成的回答" : "已接回后台正在生成的回答"
         case "state":
             setState(msg["state"] as? String ?? "idle", turn: msg["turn"] as? Int)
         case "asr_partial":
