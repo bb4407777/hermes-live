@@ -14,6 +14,8 @@ import functools
 import hmac
 import json
 import logging
+import os
+import signal
 import time
 from pathlib import Path
 
@@ -293,28 +295,40 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-async def _idle_reaper(app: web.Application) -> None:
-    """空闲会话回收：超过 session_idle_hours 无上行即关连接（同微信侧 4 小时口径）。
+async def _housekeeping(app: web.Application) -> None:
+    """两件事：① 空闲会话回收（session_idle_hours，同微信侧 4 小时口径）；
+    ② 进程到龄自退（recycle_hours，仅在无活跃会话时，launchd 立刻拉起新进程）。
 
-    只断开连接、不杀进程；前端收到 4002 后不自动重连，用户再点开始即起一条全新会话。
+    ①只断开连接、不杀进程；前端收到 4002 后不自动重连，用户再点开始即起一条全新会话。
     """
-    idle = app["cfg"].session_idle_hours * 3600
-    if idle <= 0:
+    cfg = app["cfg"]
+    idle = cfg.session_idle_hours * 3600
+    recycle = cfg.recycle_hours * 3600
+    spans = [s for s in (idle, recycle) if s > 0]
+    if not spans:
         return
-    tick = min(60.0, max(1.0, idle / 8))   # 4 小时口径＝每分钟扫一次
+    tick = min(60.0, max(1.0, min(spans) / 8))   # 4 小时口径＝每分钟扫一次
     while True:
         await asyncio.sleep(tick)
         now = time.monotonic()
-        for session in list(app["live_state"]["sessions"]):
-            if session.closed or session.ws is None:
-                continue
-            if now - session.last_active < idle:
-                continue
-            logger.info("会话空闲超过 %g 小时，自动关闭", idle / 3600)
-            with contextlib.suppress(Exception):
-                session.send_json("bye", reason="idle_timeout")
-                await asyncio.sleep(0.2)
-                await session.ws.close(code=4002, message=b"idle timeout")
+        sessions = list(app["live_state"]["sessions"])
+        if idle > 0:
+            for session in sessions:
+                if session.closed or session.ws is None:
+                    continue
+                if now - session.last_active < idle:
+                    continue
+                logger.info("会话空闲超过 %g 小时，自动关闭", idle / 3600)
+                with contextlib.suppress(Exception):
+                    session.send_json("bye", reason="idle_timeout")
+                    await asyncio.sleep(0.2)
+                    await session.ws.close(code=4002, message=b"idle timeout")
+        if recycle > 0 and not sessions:
+            uptime = now - app["started_at"]
+            if uptime >= recycle:
+                logger.info("进程在役 %.1f 小时且无活跃会话，退出待拉起", uptime / 3600)
+                os.kill(os.getpid(), signal.SIGTERM)   # web.run_app 走正常收尾（含 sidecar 回收）
+                return
 
 
 def build_app(cfg, preload: bool = True) -> web.Application:
@@ -330,7 +344,8 @@ def build_app(cfg, preload: bool = True) -> web.Application:
     async def on_startup(app: web.Application) -> None:
         app["http"] = aiohttp.ClientSession()
         app["hermes"] = HermesClient(cfg, app["http"])
-        app["idle_reaper"] = asyncio.create_task(_idle_reaper(app))
+        app["started_at"] = time.monotonic()
+        app["housekeeping"] = asyncio.create_task(_housekeeping(app))
         if preload:
             # TTS：kokoro 优先，edge-tts 兜底
             app["tts"].load()
@@ -360,9 +375,9 @@ def build_app(cfg, preload: bool = True) -> web.Application:
                            cfg.hermes_base_url)
 
     async def on_cleanup(app: web.Application) -> None:
-        app["idle_reaper"].cancel()
+        app["housekeeping"].cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await app["idle_reaper"]
+            await app["housekeeping"]
         await app["http"].close()
         app["qwen_asr"].shutdown()   # 结束 sidecar，防 launchd 重启窗口期双模型驻留
 

@@ -19,6 +19,9 @@ class Config:
     auth_token: str = ""        # 非空时 /ws 必须带 ?token=；只监听 127.0.0.1 可留空
     # 会话空闲多久自动关闭（小时，0=永不关）。同微信侧口径：4 小时无任何上行即断开
     session_idle_hours: float = 4.0
+    # 进程最长在役小时数（0=不限）：到点且无活跃会话即自退，由 launchd 立即拉起，
+    # 防长跑漂移（内存/句柄只增不减）。白天有人在用不会触发，等空闲才走。
+    recycle_hours: float = 24.0
 
     # Hermes gateway（只读依赖，绝不重启/修改它）
     hermes_base_url: str = "http://127.0.0.1:8647"
