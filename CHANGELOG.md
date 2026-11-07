@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1] - 2026-11-07
+
+### Added
+- **ACP 桥的 CLI 子进程到龄换新**：`acp_cli_max_age_hours`（默认 6）、`acp_cli_idle_grace_min`（默认 10）、
+  `acp_cli_hard_max_age_hours`（默认 24）。到龄且静默满宽限才换，话轮进行中永不换（换新＝ACP 会话重建）；
+  真实连聊整天时到硬上限只在两轮间隙换。每 5 分钟巡检一次，换新后清空 hl-id → ACP 会话映射。
+  起因：2026-11-07 高律师「我主要是想 cli 不要存活这么久，已经经常有存活一周的老进程」。
+- `/v1/health` 增 `cli_pid` 与 `cli_age_hours`，可直接看到子进程在役时长。
+
 ## [0.5.0] - 2026-11-07
 
 ### Added

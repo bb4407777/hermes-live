@@ -35,10 +35,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import signal
+import time
 import uuid
 from pathlib import Path
 
@@ -104,6 +106,46 @@ def load_acp_model() -> str:
     return model
 
 
+def load_cli_recycle() -> tuple[float, float, float]:
+    """CLI 子进程换新三档（小时）：(到龄, 静默宽限, 硬上限)。
+
+    动机（2026-11-07 高律师「我主要是想 cli 不要存活这么久，已经经常有存活一周的老进程」）：
+    codebuddy --acp 长跑会慢慢涨内存，且 CLI 内部只有单调累积的状态，不重启只会越拖越重。
+    策略是「到龄 + 静默」才换：正在聊的时候不动（换新会丢 ACP 会话上下文），
+    静默期满（默认 10 分钟）后第一次巡检换掉；真有人连聊一整天，到硬上限（默认 24h）
+    也只在两轮之间的空档换。
+    """
+    age, grace, hard = 6.0, 0.17, 24.0
+    try:
+        data = yaml.safe_load((PROJECT_ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+        if data.get("acp_cli_max_age_hours") is not None:
+            age = float(data["acp_cli_max_age_hours"])
+        if data.get("acp_cli_idle_grace_min") is not None:
+            grace = float(data["acp_cli_idle_grace_min"]) / 60
+        if data.get("acp_cli_hard_max_age_hours") is not None:
+            hard = float(data["acp_cli_hard_max_age_hours"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("acp_cli 换新配置读取失败（%s），用默认 %.0f/%.0f/%.0f 小时", e, age, grace * 60, hard)
+    for key, cur in (("ACP_BRIDGE_CLI_MAX_AGE_HOURS", age),
+                     ("ACP_BRIDGE_CLI_IDLE_GRACE_MIN", grace * 60),
+                     ("ACP_BRIDGE_CLI_HARD_MAX_AGE_HOURS", hard)):
+        env = os.environ.get(key)
+        if not env:
+            continue
+        try:
+            val = float(env)
+        except ValueError:
+            log.warning("%s=%s 不是数字，忽略", key, env)
+            continue
+        if key.endswith("GRACE_MIN"):
+            grace = val / 60
+        elif key.endswith("HARD_MAX_AGE_HOURS"):
+            hard = val
+        else:
+            age = val
+    return age * 3600, grace * 3600, hard * 3600
+
+
 def load_voice_system_prompt() -> str:
     """读 hermes-live config.yaml 的 voice_system_prompt，作为 --append-system-prompt。
     （config 改动需重启本桥才生效；hermes-live 本体重启不影响本桥。）"""
@@ -145,6 +187,7 @@ class ACPChild:
         self._lock = asyncio.Lock()
         self._next_id = 1
         self.warm_session: str | None = None  # 启动时预热好的空会话，首个 hl-id 直接认领
+        self.started_at = 0.0                 # monotonic：本轮子进程拉起时刻（换新计时基准）
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -174,6 +217,7 @@ class ACPChild:
             start_new_session=True,             # 收尾时按进程组杀，防孤儿（与中枢薄桥同款关切）
         )
         self.exited.clear()
+        self.started_at = time.monotonic()
         asyncio.create_task(self._reader())
         await self._request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, timeout=60)
         # 预热一个空会话：冷启动 session/new 实测约 10s，语音第一轮不该垫进去
@@ -189,6 +233,21 @@ class ACPChild:
                 os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
             except ProcessLookupError:
                 pass
+
+    async def stop(self, timeout: float = 10) -> None:
+        """到期换新用：SIGTERM 整组后等它真退（不等就 start 会撞上还活着的旧进程）。"""
+        if self.proc is not None and self.proc.returncode is None:
+            self.kill()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.exited.wait(), timeout=timeout)
+            if self.proc.returncode is None:      # 10 秒还不走，硬杀
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.exited.wait(), timeout=5)
+        self.pending.clear()
+        self.subs.clear()
+        self.warm_session = None
 
     async def ensure_alive(self, cli: str, model: str) -> bool:
         """活着返回 False；(re)拉起返回 True——调用方必须同步清空 hl→ACP 会话映射，
@@ -376,6 +435,8 @@ class Bridge:
         # hl-xxx（hermes-live 自铸会话身份）→ ACP sessionId
         self.sessions: dict[str, str] = {}
         self.turn_lock = asyncio.Lock()  # 半双工：同一时刻只跑一轮模型
+        self.max_age, self.idle_grace, self.hard_max_age = load_cli_recycle()
+        self.last_used = 0.0             # monotonic：最近一轮请求进来的时刻
 
     async def _acp_session_for(self, hl_id: str) -> str:
         sid = self.sessions.get(hl_id)
@@ -391,14 +452,51 @@ class Bridge:
 
     async def health(self, _request: web.Request) -> web.Response:
         if self.child.alive:
-            return web.json_response({"ok": True, "engine": self.model})
+            age = time.monotonic() - self.child.started_at if self.child.started_at else 0.0
+            return web.json_response({"ok": True, "engine": self.model,
+                                      "cli_pid": self.child.proc.pid if self.child.proc else None,
+                                      "cli_age_hours": round(age / 3600, 2)})
         return web.json_response({"ok": False}, status=503)
+
+    async def recycle_if_due(self) -> bool:
+        """CLI 到龄且已静默（或到硬上限且不在话轮中）→ 换一个全新子进程。
+
+        换新会清空 hl-id → ACP 会话映射，各端下一轮重新建会话（上下文清零）。
+        故选时机：静默满 idle_grace 才换；话轮进行中永不换。
+        """
+        if self.max_age <= 0 or not self.child.alive:
+            return False
+        now = time.monotonic()
+        age = now - self.child.started_at
+        if age < self.max_age:
+            return False
+        idle_enough = (now - self.last_used) >= self.idle_grace
+        if not idle_enough and age < self.hard_max_age:
+            return False
+        if self.turn_lock.locked():
+            return False
+        async with self.turn_lock:
+            if not self.child.alive or time.monotonic() - self.child.started_at < self.max_age:
+                return False
+            log.info("CLI 子进程在役 %.1f 小时、静默 %.0f 分钟，换新（旧 pid=%s）",
+                     age / 3600, (time.monotonic() - self.last_used) / 60,
+                     self.child.proc.pid if self.child.proc else None)
+            await self.child.stop()
+            self.sessions.clear()
+            try:
+                await self.child.start(self.cli, self.model)
+            except Exception as e:  # noqa: BLE001 — 拉不起来不致命，下一轮聊天会 ensure_alive
+                log.exception("换新后拉起 CLI 失败（%s），等下一轮自动重试", e)
+                return True
+            log.info("CLI 已换新（pid=%s）", self.child.proc.pid if self.child.proc else None)
+            return True
 
     async def chat(self, request: web.Request) -> web.StreamResponse:
         try:
             body = await request.json()
         except Exception:  # noqa: BLE001
             return web.json_response({"error": "bad json"}, status=400)
+        self.last_used = time.monotonic()
         hl_id = request.headers.get("X-Hermes-Session-Id") or f"hl-anon-{uuid.uuid4().hex[:8]}"
         # 取最后一条 user 消息（hermes_client 每轮只发 system+最新 user，与 gateway 语义一致）
         user_text = ""
@@ -529,6 +627,19 @@ async def amain() -> None:
     app.router.add_get("/v1/health", bridge.health)
     app.router.add_post("/v1/chat/completions", bridge.chat)
     log.info("acp_bridge 监听 %s:%s（顶替退役 Hermes gateway 的 8647 插槽，引擎=%s）", HOST, PORT, bridge.model)
+    log.info("CLI 换新：到龄 %.0f 小时、静默宽限 %.0f 分钟、硬上限 %.0f 小时（0=不换）",
+             bridge.max_age / 3600, bridge.idle_grace / 60, bridge.hard_max_age / 3600)
+    async def cli_recycler() -> None:
+        """每 5 分钟看一次：CLI 到龄且静默就换新。"""
+        tick = float(os.environ.get("ACP_BRIDGE_RECYCLE_TICK_SEC", "300") or 300)
+        while True:
+            await asyncio.sleep(max(1.0, tick))
+            try:
+                await bridge.recycle_if_due()
+            except Exception:  # noqa: BLE001 — 巡检不能把桥带崩
+                log.exception("CLI 换新巡检失败")
+
+    recycler = asyncio.create_task(cli_recycler())
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, HOST, PORT)
@@ -538,6 +649,9 @@ async def amain() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
     await stop.wait()
+    recycler.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await recycler
     await runner.cleanup()
 
 
