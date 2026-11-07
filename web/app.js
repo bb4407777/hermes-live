@@ -206,12 +206,12 @@ function connect() {
     socket.onerror = (e) => { if (!stale()) { hintAuth(); reject(e); } };
     socket.onclose = (e) => {
       if (stale()) return;
-      if (e.code === 4001) {
-        // 被新连接顶替（服务端单活跃连接）：本页退场，不与新页面互踢
+      if (e.code === 4002) {
+        // 服务端空闲回收（4 小时无上行）：不重连，等用户重新点开始
         wantLive = false;
         clearReconnect();
         audio.stop();
-        setStatus('已在其他页面打开，本页停止');
+        setStatus('长时间未使用，会话已关闭');
         setState('idle');
         els.btnToggle.textContent = '开始对话';
         return;

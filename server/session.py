@@ -63,6 +63,8 @@ class Session:
         self.ptt = False               # 按住说话模式：listening 态不跑 VAD，等 utterance_end 收口
         self._ptt_buf: list[bytes] = []  # PTT 期间攒的帧（batch ASR 兜底用）
         self.closed = False
+        self.ws = None                 # 所属 WS 连接，空闲回收时由 reaper 关闭
+        self.last_active = 0.0         # 最近一次上行（音频/文字）的 monotonic 时间
         self._recent_tts_texts: list[tuple[float, str]] = []  # (timestamp, sentence) 回声过滤缓冲
 
     # ---------- 出站 ----------
